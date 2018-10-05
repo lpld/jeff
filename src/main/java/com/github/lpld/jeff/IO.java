@@ -47,11 +47,11 @@ public abstract class IO<T> {
   }
 
   public <U> IO<U> map(F<T, U> f) {
-    return new Delay<>(() -> f.apply(run()));
+    return flatMap(f.andThen(IO::pure));
   }
 
   public <U> IO<U> flatMap(F<T, IO<U>> f) {
-    return new Delay<>(() -> f.apply(run()).run());
+    return new FlatMap<>(this, f);
   }
 
   public <U> IO<U> then(F0<IO<U>> f) {
@@ -66,38 +66,66 @@ public abstract class IO<T> {
     return new Recover<>(this, r);
   }
 
-  abstract T run();
+  public T runUnsafe() {
+    try {
+      return run();
+    } catch (Throwable throwable) {
+      return WrappedError.throwWrapped(throwable);
+    }
+  }
+
+  protected T run() throws Throwable {
+    IO<T> io = this;
+
+    while (true) {
+      if (io instanceof Pure) {
+        return ((Pure<T>) io).pure;
+      } else if (io instanceof Delay) {
+        return ((Delay<T>) io).thunk.get();
+      } else if (io instanceof Suspend) {
+        io = ((Suspend<T>) io).resume.get();
+      } else if (io instanceof FlatMap) {
+        final FlatMap<Object, T> fm = ((FlatMap<Object, T>) io);
+
+        if (fm.source instanceof Pure) {
+          io = fm.f.apply(((Pure<?>) fm.source).pure);
+        } else if (fm.source instanceof Delay) {
+          io = fm.f.apply(((Delay<?>) fm.source).thunk.get());
+        } else if (fm.source instanceof Suspend) {
+          io = fm.f.apply(((Suspend<?>) fm.source).resume.get().run()); // todo ??
+        } else if (fm.source instanceof FlatMap) {
+          final FlatMap<Object, Object> fm2 = (FlatMap<Object, Object>) fm.source;
+          io = fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(fm.f));
+        }
+      }
+    }
+  }
 }
 
 class Delay<T> extends IO<T> {
 
-  private final F0<T> resume;
+  final F0<T> thunk;
 
-  Delay(F0<T> resume) {
-    this.resume = resume;
+  Delay(F0<T> thunk) {
+    this.thunk = thunk;
   }
+}
 
-  @Override
-  T run() {
-    try {
-      return resume.get();
-    } catch (Throwable throwable) {
-      return WrappedError.throwWrapped(throwable);
-    }
+class Suspend<T> extends IO<T> {
+
+  final F0<IO<T>> resume;
+
+  Suspend(F0<IO<T>> resume) {
+    this.resume = resume;
   }
 }
 
 class Pure<T> extends IO<T> {
 
-  private final T pure;
+  final T pure;
 
   Pure(T pure) {
     this.pure = pure;
-  }
-
-  @Override
-  T run() {
-    return pure;
   }
 }
 
@@ -110,8 +138,8 @@ class RaiseError<T> extends IO<T> {
   }
 
   @Override
-  T run() {
-    return WrappedError.throwWrapped(t);
+  protected T run() throws Throwable {
+    throw t;
   }
 }
 
@@ -126,14 +154,25 @@ class Recover<T> extends IO<T> {
   }
 
   @Override
-  T run() {
+  protected T run() throws Throwable {
     try {
       return io.run();
     } catch (Throwable t) {
       return recover
           .apply(t)
-          .orElseGet(() -> WrappedError.throwWrapped(t))
+          .orElseThrow(() -> t)
           .run();
     }
+  }
+}
+
+class FlatMap<T, U> extends IO<U> {
+
+  final IO<T> source;
+  final F<T, IO<U>> f;
+
+  public FlatMap(IO<T> io, F<T, IO<U>> f) {
+    this.source = io;
+    this.f = f;
   }
 }

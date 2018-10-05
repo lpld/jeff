@@ -13,7 +13,7 @@ import static com.github.lpld.jeff.Recovery.rules;
 public class AppTest {
 
   @Test
-  @Ignore("stack overflow")
+//  @Ignore("stack overflow")
   public void flatMapTest() {
 
     IO<Unit> io = IO.unit;
@@ -25,7 +25,7 @@ public class AppTest {
           .flatMap(ii -> IO(() -> System.out.println(ii)));
     }
 
-    io.run();
+    io.runUnsafe();
   }
 
   @Test

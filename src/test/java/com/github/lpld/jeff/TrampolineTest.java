@@ -21,6 +21,18 @@ public class TrampolineTest {
     }
   }
 
+  private Trampoline<Long> fib2(int n, long a, long b) {
+    return Trampoline.more(() -> {
+      final long b2 = a + b;
+
+      if (n > 0) {
+        return fib(n - 1, b, b2);
+      } else {
+        return done(b2);
+      }
+    });
+  }
+
   private long fibUnsafe(int n, long a, long b) {
     final long b2 = a + b;
 
@@ -36,5 +48,7 @@ public class TrampolineTest {
     // fibUnsafe(100000, 0, 1);
     final Long fib = fib(100000, 0, 1).eval();
     System.out.println(fib);
+    final Long fib2 = fib2(100000, 0, 1).eval();
+    System.out.println(fib2);
   }
 }
