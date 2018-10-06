@@ -83,22 +83,39 @@ public abstract class IO<T> {
       } else if (io instanceof Delay) {
         return ((Delay<T>) io).thunk.get();
       } else if (io instanceof Suspend) {
-        io = ((Suspend<T>) io).resume.get();
+        io = unfoldSuspend((Suspend<T>) io);
       } else if (io instanceof FlatMap) {
-        final FlatMap<Object, T> fm = ((FlatMap<Object, T>) io);
-
-        if (fm.source instanceof Pure) {
-          io = fm.f.apply(((Pure<?>) fm.source).pure);
-        } else if (fm.source instanceof Delay) {
-          io = fm.f.apply(((Delay<?>) fm.source).thunk.get());
-        } else if (fm.source instanceof Suspend) {
-          io = fm.f.apply(((Suspend<?>) fm.source).resume.get().run()); // todo ??
-        } else if (fm.source instanceof FlatMap) {
-          final FlatMap<Object, Object> fm2 = (FlatMap<Object, Object>) fm.source;
-          io = fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(fm.f));
-        }
+        io = unfoldFlatMap(((FlatMap<?, T>) io));
       }
     }
+    // todo: handle RaiseError and Recover
+  }
+
+  private static <T> IO<T> unfoldSuspend(Suspend<T> s) throws Throwable {
+    IO<T> io = s;
+    while (io instanceof Suspend) {
+      io = ((Suspend<T>) io).resume.get();
+    }
+    return io;
+  }
+
+  private static <T, U> IO<U> unfoldFlatMap(FlatMap<T, U> fm) throws Throwable {
+    final F<T, IO<U>> f = fm.f;
+    IO<T> source = fm.source;
+    if (source instanceof Suspend) {
+      source = unfoldSuspend(((Suspend<T>) source));
+    }
+
+    if (source instanceof Pure) {
+      return f.apply(((Pure<T>) source).pure);
+    } else if (source instanceof Delay) {
+      return f.apply(((Delay<T>) source).thunk.get());
+    } else if (source instanceof FlatMap) {
+      final FlatMap<Object, T> fm2 = (FlatMap<Object, T>) source;
+      return fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(f));
+    }
+
+    throw new IllegalStateException();
   }
 }
 
