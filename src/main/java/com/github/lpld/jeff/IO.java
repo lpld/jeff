@@ -7,6 +7,8 @@ import com.github.lpld.jeff.functions.Run;
 import java.util.Optional;
 import java.util.function.Function;
 
+import lombok.RequiredArgsConstructor;
+
 
 /**
  * IO monad for Java, sort of.
@@ -75,60 +77,34 @@ public abstract class IO<T> {
   }
 }
 
+@RequiredArgsConstructor
 class Delay<T> extends IO<T> {
-
   final F0<T> thunk;
-
-  Delay(F0<T> thunk) {
-    this.thunk = thunk;
-  }
 }
 
+@RequiredArgsConstructor
 class Suspend<T> extends IO<T> {
-
   final F0<IO<T>> resume;
-
-  Suspend(F0<IO<T>> resume) {
-    this.resume = resume;
-  }
 }
 
+@RequiredArgsConstructor
 class Pure<T> extends IO<T> {
-
   final T pure;
-
-  Pure(T pure) {
-    this.pure = pure;
-  }
 }
 
+@RequiredArgsConstructor
 class RaiseError<T> extends IO<T> {
-
   final Throwable t;
-
-  RaiseError(Throwable t) {
-    this.t = t;
-  }
 }
 
+@RequiredArgsConstructor
 class Recover<T> extends IO<T> {
-
   final IO<T> io;
   final Function<Throwable, Optional<IO<T>>> recover;
-
-  Recover(IO<T> io, Function<Throwable, Optional<IO<T>>> recover) {
-    this.io = io;
-    this.recover = recover;
-  }
 }
 
+@RequiredArgsConstructor
 class FlatMap<T, U> extends IO<U> {
-
   final IO<T> source;
   final F<T, IO<U>> f;
-
-  FlatMap(IO<T> io, F<T, IO<U>> f) {
-    this.source = io;
-    this.f = f;
-  }
 }

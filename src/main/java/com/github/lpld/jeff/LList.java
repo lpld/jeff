@@ -1,5 +1,7 @@
 package com.github.lpld.jeff;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * @author leopold
  * @since 6/10/18
@@ -25,14 +27,8 @@ class LNil extends LList<Object> {
   }
 }
 
+@RequiredArgsConstructor
 class LCons<T> extends LList<T> {
-
   final T value;
   final LList<T> tail;
-
-  public LCons(T value, LList<T> tail) {
-    this.value = value;
-    this.tail = tail;
-  }
-
 }

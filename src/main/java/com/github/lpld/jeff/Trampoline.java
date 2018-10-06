@@ -2,6 +2,8 @@ package com.github.lpld.jeff;
 
 import java.util.function.Supplier;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * @author leopold
  * @since 5/10/18
@@ -26,18 +28,12 @@ public abstract class Trampoline<T> {
   }
 }
 
+@RequiredArgsConstructor
 class Done<T> extends Trampoline<T> {
   final T value;
-
-  Done(T value) {
-    this.value = value;
-  }
 }
 
+@RequiredArgsConstructor
 class More<T> extends Trampoline<T> {
   final Supplier<Trampoline<T>> call;
-
-  More(Supplier<Trampoline<T>> call) {
-    this.call = call;
-  }
 }

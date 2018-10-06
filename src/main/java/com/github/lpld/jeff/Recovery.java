@@ -7,6 +7,8 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * @author leopold
  * @since 5/10/18
@@ -25,16 +27,11 @@ public class Recovery {
     return new ThrowablePredicate<>(errorClass, (e) -> true);
   }
 
+  @RequiredArgsConstructor
   static class ThrowablePredicate<E extends Throwable> {
 
     private final Class<E> clazz;
     private final Predicate<E> predicate;
-
-    private ThrowablePredicate(Class<E> clazz, Predicate<E> predicate) {
-      this.clazz = clazz;
-      this.predicate = predicate;
-    }
-
 
     public ThrowablePredicate<E> and(Predicate<E> predicate) {
       return new ThrowablePredicate<>(clazz, this.predicate.and(predicate));
@@ -54,16 +51,10 @@ public class Recovery {
     }
   }
 
+  @RequiredArgsConstructor
   static class RecoveryRule<T> {
-
     private final ThrowablePredicate<?> predicate;
     final Supplier<T> onError;
-
-    public RecoveryRule(ThrowablePredicate<?> predicate, Supplier<T> onError) {
-      this.predicate = predicate;
-      this.onError = onError;
-    }
-
   }
 }
 
