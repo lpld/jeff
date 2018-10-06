@@ -68,54 +68,10 @@ public abstract class IO<T> {
 
   public T runUnsafe() {
     try {
-      return run();
+      return IORun.run(this);
     } catch (Throwable throwable) {
       return WrappedError.throwWrapped(throwable);
     }
-  }
-
-  protected T run() throws Throwable {
-    IO<T> io = this;
-
-    while (true) {
-      if (io instanceof Pure) {
-        return ((Pure<T>) io).pure;
-      } else if (io instanceof Delay) {
-        return ((Delay<T>) io).thunk.get();
-      } else if (io instanceof Suspend) {
-        io = unfoldSuspend((Suspend<T>) io);
-      } else if (io instanceof FlatMap) {
-        io = unfoldFlatMap(((FlatMap<?, T>) io));
-      }
-    }
-    // todo: handle RaiseError and Recover
-  }
-
-  private static <T> IO<T> unfoldSuspend(Suspend<T> s) throws Throwable {
-    IO<T> io = s;
-    while (io instanceof Suspend) {
-      io = ((Suspend<T>) io).resume.get();
-    }
-    return io;
-  }
-
-  private static <T, U> IO<U> unfoldFlatMap(FlatMap<T, U> fm) throws Throwable {
-    final F<T, IO<U>> f = fm.f;
-    IO<T> source = fm.source;
-    if (source instanceof Suspend) {
-      source = unfoldSuspend(((Suspend<T>) source));
-    }
-
-    if (source instanceof Pure) {
-      return f.apply(((Pure<T>) source).pure);
-    } else if (source instanceof Delay) {
-      return f.apply(((Delay<T>) source).thunk.get());
-    } else if (source instanceof FlatMap) {
-      final FlatMap<Object, T> fm2 = (FlatMap<Object, T>) source;
-      return fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(f));
-    }
-
-    throw new IllegalStateException();
   }
 }
 
@@ -148,38 +104,21 @@ class Pure<T> extends IO<T> {
 
 class RaiseError<T> extends IO<T> {
 
-  private final Throwable t;
+  final Throwable t;
 
   RaiseError(Throwable t) {
     this.t = t;
-  }
-
-  @Override
-  protected T run() throws Throwable {
-    throw t;
   }
 }
 
 class Recover<T> extends IO<T> {
 
-  private final IO<T> io;
-  private final Function<Throwable, Optional<IO<T>>> recover;
+  final IO<T> io;
+  final Function<Throwable, Optional<IO<T>>> recover;
 
   Recover(IO<T> io, Function<Throwable, Optional<IO<T>>> recover) {
     this.io = io;
     this.recover = recover;
-  }
-
-  @Override
-  protected T run() throws Throwable {
-    try {
-      return io.run();
-    } catch (Throwable t) {
-      return recover
-          .apply(t)
-          .orElseThrow(() -> t)
-          .run();
-    }
   }
 }
 
@@ -188,7 +127,7 @@ class FlatMap<T, U> extends IO<U> {
   final IO<T> source;
   final F<T, IO<U>> f;
 
-  public FlatMap(IO<T> io, F<T, IO<U>> f) {
+  FlatMap(IO<T> io, F<T, IO<U>> f) {
     this.source = io;
     this.f = f;
   }
