@@ -1,12 +1,15 @@
 package com.github.lpld.jeff;
 
-import com.github.lpld.jeff.functions.F;
-import com.github.lpld.jeff.functions.F0;
+import com.github.lpld.jeff.data.Or;
+import com.github.lpld.jeff.functions.Fn;
+import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Run;
 
 import java.util.Optional;
 import java.util.function.Function;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
 
@@ -17,12 +20,10 @@ import lombok.RequiredArgsConstructor;
  * @since 4/10/18
  */
 @SuppressWarnings("WeakerAccess")
+@NoArgsConstructor(access = AccessLevel.PACKAGE)
 public abstract class IO<T> {
 
-  IO() {
-  }
-
-  public static <T> IO<T> IO(F0<T> action) {
+  public static <T> IO<T> IO(Fn0<T> action) {
     return delay(action);
   }
 
@@ -32,7 +33,7 @@ public abstract class IO<T> {
 
   public static final IO<Unit> unit = pure(Unit.unit);
 
-  public static <T> IO<T> delay(F0<T> action) {
+  public static <T> IO<T> delay(Fn0<T> action) {
     return new Delay<>(action);
   }
 
@@ -48,16 +49,20 @@ public abstract class IO<T> {
     return new RaiseError<>(t);
   }
 
-  public <U> IO<U> map(F<T, U> f) {
+  public <U> IO<U> map(Fn<T, U> f) {
     return flatMap(f.andThen(IO::pure));
   }
 
-  public <U> IO<U> flatMap(F<T, IO<U>> f) {
+  public <U> IO<U> flatMap(Fn<T, IO<U>> f) {
     return new Bind<>(this, f);
   }
 
-  public <U> IO<U> then(F0<IO<U>> f) {
+  public <U> IO<U> then(Fn0<IO<U>> f) {
     return flatMap(t -> f.get());
+  }
+
+  public IO<Or<Throwable, T>> attempt() {
+    return map(Or::<Throwable, T>right).recover(t -> Optional.of(Or.left(t)));
   }
 
   public IO<T> recover(Function<Throwable, Optional<T>> r) {
@@ -79,12 +84,14 @@ public abstract class IO<T> {
 
 @RequiredArgsConstructor
 class Delay<T> extends IO<T> {
-  final F0<T> thunk;
+
+  final Fn0<T> thunk;
 }
 
 @RequiredArgsConstructor
 class Suspend<T> extends IO<T> {
-  final F0<IO<T>> resume;
+
+  final Fn0<IO<T>> resume;
 }
 
 @RequiredArgsConstructor
@@ -106,5 +113,5 @@ class Recover<T> extends IO<T> {
 @RequiredArgsConstructor
 class Bind<T, U> extends IO<U> {
   final IO<T> source;
-  final F<T, IO<U>> f;
+  final Fn<T, IO<U>> f;
 }

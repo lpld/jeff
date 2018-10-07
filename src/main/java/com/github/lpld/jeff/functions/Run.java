@@ -10,7 +10,7 @@ public interface Run {
 
   void run() throws Throwable;
 
-  default F0<Unit> toF0() {
+  default Fn0<Unit> toF0() {
     return () -> {
       run();
       return Unit.unit;

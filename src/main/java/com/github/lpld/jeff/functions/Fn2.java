@@ -5,8 +5,7 @@ package com.github.lpld.jeff.functions;
  * @since 4/10/18
  */
 @FunctionalInterface
-public interface F0<T> {
+public interface Fn2<T1, T2, R> {
 
-  T get() throws Throwable;
-
+  R apply(T1 t1, T2 t2) throws Throwable;
 }

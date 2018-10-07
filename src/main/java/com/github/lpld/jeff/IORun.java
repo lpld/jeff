@@ -1,6 +1,6 @@
 package com.github.lpld.jeff;
 
-import com.github.lpld.jeff.functions.F;
+import com.github.lpld.jeff.functions.Fn;
 
 import java.util.Optional;
 import java.util.function.Function;
@@ -44,7 +44,7 @@ final class IORun {
 
   private static <T, U, V> IO<U> applyFlatMap(Bind<T, U> fm) throws Throwable {
     final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
-    final F<T, IO<U>> f = fm.f;
+    final Fn<T, IO<U>> f = fm.f;
     final IO<T> source = unfold(fm.source, errorHandlers);
 
     if (source instanceof Pure) {
