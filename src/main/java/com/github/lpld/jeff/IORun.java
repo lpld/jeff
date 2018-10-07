@@ -5,15 +5,19 @@ import com.github.lpld.jeff.functions.F;
 import java.util.Optional;
 import java.util.function.Function;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /**
  * @author leopold
  * @since 6/10/18
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class IORun {
 
-  private IORun() {
-  }
-
+  /**
+   * Stack-safe evaluation of IO.
+   */
   static <T> T run(IO<T> io) throws Throwable {
 
     final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
@@ -27,15 +31,29 @@ final class IORun {
         return ((Pure<T>) io).pure;
       }
 
-      assert io instanceof FlatMap;
+      assert io instanceof Bind;
 
       // FlatMap:
       try {
-        io = applyFlatMap(((FlatMap<?, T>) io));
+        io = applyFlatMap(((Bind<?, T>) io));
       } catch (Throwable t) {
         io = errorHandlers.tryHandle(t);
       }
     }
+  }
+
+  private static <T, U, V> IO<U> applyFlatMap(Bind<T, U> fm) throws Throwable {
+    final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
+    final F<T, IO<U>> f = fm.f;
+    final IO<T> source = unfold(fm.source, errorHandlers);
+
+    if (source instanceof Pure) {
+      return f.apply(((Pure<T>) source).pure);
+    }
+
+    assert source instanceof Bind;
+    final Bind<V, T> fm2 = (Bind<V, T>) source;
+    return fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(f));
   }
 
   private static <T> IO<T> unfold(IO<T> io, ErrorHandlers<T> errorHandlers) throws Throwable {
@@ -65,19 +83,6 @@ final class IORun {
     return unfolded;
   }
 
-  private static <T, U, V> IO<U> applyFlatMap(FlatMap<T, U> fm) throws Throwable {
-    final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
-    final F<T, IO<U>> f = fm.f;
-    final IO<T> source = unfold(fm.source, errorHandlers);
-
-    if (source instanceof Pure) {
-      return f.apply(((Pure<T>) source).pure);
-    }
-
-    assert source instanceof FlatMap;
-    final FlatMap<V, T> fm2 = (FlatMap<V, T>) source;
-    return fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(f));
-  }
 }
 
 class ErrorHandlers<T> {

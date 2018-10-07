@@ -1,6 +1,5 @@
 package com.github.lpld.jeff;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -25,7 +24,7 @@ public class AppTest {
           .flatMap(ii -> IO(() -> System.out.println(ii)));
     }
 
-    io.runUnsafe();
+    io.run();
   }
 
   @Test

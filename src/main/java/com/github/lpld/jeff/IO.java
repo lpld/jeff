@@ -53,7 +53,7 @@ public abstract class IO<T> {
   }
 
   public <U> IO<U> flatMap(F<T, IO<U>> f) {
-    return new FlatMap<>(this, f);
+    return new Bind<>(this, f);
   }
 
   public <U> IO<U> then(F0<IO<U>> f) {
@@ -68,7 +68,7 @@ public abstract class IO<T> {
     return new Recover<>(this, r);
   }
 
-  public T runUnsafe() {
+  public T run() {
     try {
       return IORun.run(this);
     } catch (Throwable throwable) {
@@ -104,7 +104,7 @@ class Recover<T> extends IO<T> {
 }
 
 @RequiredArgsConstructor
-class FlatMap<T, U> extends IO<U> {
+class Bind<T, U> extends IO<U> {
   final IO<T> source;
   final F<T, IO<U>> f;
 }
