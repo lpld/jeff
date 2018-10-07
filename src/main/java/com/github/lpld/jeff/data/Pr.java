@@ -17,6 +17,9 @@ public final class Pr<T1, T2> {
   public static <T1, T2> Pr<T1, T2> of(T1 t1, T2 t2) {
     return new Pr<>(t1, t2);
   }
+  public static <T1, T2> Pr<T1, T2> Pr(T1 t1, T2 t2) {
+    return of(t1, t2);
+  }
 
   public T1 _1() {
     return _1;

@@ -1,6 +1,6 @@
 package com.github.lpld.jeff.functions;
 
-import com.github.lpld.jeff.Unit;
+import com.github.lpld.jeff.data.Unit;
 
 /**
  * @author leopold

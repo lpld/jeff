@@ -1,4 +1,4 @@
-package com.github.lpld.jeff;
+package com.github.lpld.jeff.data;
 
 /**
  * @author leopold

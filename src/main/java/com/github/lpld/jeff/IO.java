@@ -1,6 +1,7 @@
 package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.data.Or;
+import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Run;
@@ -24,37 +25,37 @@ import lombok.RequiredArgsConstructor;
 public abstract class IO<T> {
 
   public static <T> IO<T> IO(Fn0<T> action) {
-    return delay(action);
+    return Delay(action);
   }
 
   public static IO<Unit> IO(Run action) {
-    return delay(action);
+    return Delay(action);
   }
 
-  public static final IO<Unit> unit = pure(Unit.unit);
+  public static final IO<Unit> unit = Pure(Unit.unit);
 
-  public static <T> IO<T> delay(Fn0<T> action) {
+  public static <T> IO<T> Delay(Fn0<T> action) {
     return new Delay<>(action);
   }
 
-  public static IO<Unit> delay(Run action) {
-    return delay(action.toF0());
+  public static IO<Unit> Delay(Run action) {
+    return Delay(action.toF0());
   }
 
-  public static <T> IO<T> suspend(Fn0<IO<T>> resume) {
+  public static <T> IO<T> Suspend(Fn0<IO<T>> resume) {
     return new Suspend<>(resume);
   }
 
-  public static <T> IO<T> pure(T pure) {
+  public static <T> IO<T> Pure(T pure) {
     return new Pure<>(pure);
   }
 
-  public static <T> IO<T> raiseError(Throwable t) {
+  public static <T> IO<T> RaiseError(Throwable t) {
     return new RaiseError<>(t);
   }
 
   public <U> IO<U> map(Fn<T, U> f) {
-    return flatMap(f.andThen(IO::pure));
+    return flatMap(f.andThen(IO::Pure));
   }
 
   public <U> IO<U> flatMap(Fn<T, IO<U>> f) {
@@ -70,7 +71,7 @@ public abstract class IO<T> {
   }
 
   public IO<T> recover(Function<Throwable, Optional<T>> r) {
-    return recoverWith(r.andThen(opt -> opt.map(IO::pure)));
+    return recoverWith(r.andThen(opt -> opt.map(IO::Pure)));
   }
 
   public IO<T> recoverWith(Function<Throwable, Optional<IO<T>>> r) {

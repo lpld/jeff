@@ -1,5 +1,7 @@
 package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.data.Unit;
+
 import org.junit.Test;
 
 import java.io.IOException;
@@ -30,7 +32,7 @@ public class AppTest {
   @Test
   public void shouldAnswerWithTrue() {
 
-    final IO<Integer> io = IO.delay(() -> {
+    final IO<Integer> io = IO.Delay(() -> {
       System.out.println();
       return 5;
     });

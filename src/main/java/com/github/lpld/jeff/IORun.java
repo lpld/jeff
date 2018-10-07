@@ -72,7 +72,7 @@ final class IORun {
         }
       } else if (io instanceof Delay) {
         try {
-          unfolded = IO.pure(((Delay<T>) io).thunk.ap());
+          unfolded = IO.Pure(((Delay<T>) io).thunk.ap());
         } catch (Throwable t) {
           unfolded = errorHandlers.tryHandle(t);
         }
