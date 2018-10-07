@@ -48,12 +48,12 @@ final class IORun {
     final IO<T> source = unfold(fm.source, errorHandlers);
 
     if (source instanceof Pure) {
-      return f.apply(((Pure<T>) source).pure);
+      return f.ap(((Pure<T>) source).pure);
     }
 
     assert source instanceof Bind;
     final Bind<V, T> fm2 = (Bind<V, T>) source;
-    return fm2.source.flatMap(a -> fm2.f.apply(a).flatMap(f));
+    return fm2.source.flatMap(a -> fm2.f.ap(a).flatMap(f));
   }
 
   private static <T> IO<T> unfold(IO<T> io, ErrorHandlers<T> errorHandlers) throws Throwable {
@@ -66,13 +66,13 @@ final class IORun {
         io = errorHandlers.tryHandle(((RaiseError<T>) io).t);
       } else if (io instanceof Suspend) {
         try {
-          io = ((Suspend<T>) io).resume.get();
+          io = ((Suspend<T>) io).resume.ap();
         } catch (Throwable t) {
           io = errorHandlers.tryHandle(t);
         }
       } else if (io instanceof Delay) {
         try {
-          unfolded = IO.pure(((Delay<T>) io).thunk.get());
+          unfolded = IO.pure(((Delay<T>) io).thunk.ap());
         } catch (Throwable t) {
           unfolded = errorHandlers.tryHandle(t);
         }

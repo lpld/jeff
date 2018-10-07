@@ -7,6 +7,6 @@ package com.github.lpld.jeff.functions;
 @FunctionalInterface
 public interface Fn0<T> {
 
-  T get() throws Throwable;
+  T ap() throws Throwable;
 
 }

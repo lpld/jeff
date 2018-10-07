@@ -46,7 +46,7 @@ public abstract class Stream<T> {
 
   // Unfold that eagerly evaluates the first step:
   private static <T, S> Stream<T> unfoldEager(S z, Fn<S, Optional<Pr<T, S>>> f) throws Throwable {
-    return f.apply(z)
+    return f.ap(z)
         .map(p -> ((Stream<T>) new Cons<>(IO.pure(p._1), IO.delay(() -> unfoldEager(p._2, f)))))
         .orElseGet(Nil::instance);
   }
@@ -75,25 +75,66 @@ public abstract class Stream<T> {
       final IO<T> head = ((Cons<T>) this).head;
       final IO<Stream<T>> tail = ((Cons<T>) this).tail;
 
-      return head.flatMap(h -> {
-        final R zz = f.apply(z, h);
-        return tail.flatMap(t -> t.foldLeft(zz, f));
-      });
+      // @formatter:off
+      return head
+          .flatMap(h -> tail
+          .flatMap(t -> t.foldLeft(f.ap(z, h), f)
+      ));
+      // @formatter:on
     }
 
     if (this instanceof Concat) {
       final IO<Stream<T>> stream1 = ((Concat<T>) this).stream1;
       final IO<Stream<T>> stream2 = ((Concat<T>) this).stream2;
 
-      return stream1.flatMap(
-          s1 -> s1.foldLeft(z, f).flatMap(
-          zz -> stream2.flatMap(
-          s2 -> s2.foldLeft(zz, f)
+      // @formatter:off
+      return stream1
+          .flatMap(s1 -> s1.foldLeft(z, f)
+          .flatMap(zz -> stream2
+          .flatMap(s2 -> s2.foldLeft(zz, f)
       )));
+      // @formatter:on
     }
 
     throw new IllegalStateException();
   }
+
+  public <R> IO<R> foldRight(R z, Fn2<T, R, R> f) {
+    return foldRight(IO.pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
+  }
+
+  public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
+    if (this instanceof Nil) {
+      return z;
+    }
+
+    if (this instanceof Cons) {
+      final IO<T> head = ((Cons<T>) this).head;
+      final IO<Stream<T>> tail = ((Cons<T>) this).tail;
+
+      // @formatter:off
+      return head
+          .flatMap(h -> tail
+          .flatMap(t -> f.ap(h, t.foldRight(z, f))
+      ));
+      // @formatter:on
+    }
+
+    if (this instanceof Concat) {
+      final IO<Stream<T>> stream1 = ((Concat<T>) this).stream1;
+      final IO<Stream<T>> stream2 = ((Concat<T>) this).stream2;
+
+      // @formatter:off
+      return stream2
+          .flatMap(s2 -> stream1
+          .flatMap(s1 -> s1.foldRight(IO.suspend(() -> s2.foldRight(z, f)), f)
+      ));
+      // @formatter:on
+    }
+
+    throw new IllegalStateException();
+  }
+
 }
 
 @RequiredArgsConstructor

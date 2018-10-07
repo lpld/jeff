@@ -41,6 +41,10 @@ public abstract class IO<T> {
     return delay(action.toF0());
   }
 
+  public static <T> IO<T> suspend(Fn0<IO<T>> resume) {
+    return new Suspend<>(resume);
+  }
+
   public static <T> IO<T> pure(T pure) {
     return new Pure<>(pure);
   }
@@ -58,7 +62,7 @@ public abstract class IO<T> {
   }
 
   public <U> IO<U> then(Fn0<IO<U>> f) {
-    return flatMap(t -> f.get());
+    return flatMap(t -> f.ap());
   }
 
   public IO<Or<Throwable, T>> attempt() {
