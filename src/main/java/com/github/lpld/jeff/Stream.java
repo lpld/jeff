@@ -2,7 +2,6 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.functions.Fn;
-import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Fn2;
 
 import java.util.Arrays;
@@ -13,10 +12,8 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
-import static com.github.lpld.jeff.IO.Delay;
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
-import static com.github.lpld.jeff.IO.Suspend;
 import static com.github.lpld.jeff.IOMethods.flatMap2;
 import static com.github.lpld.jeff.data.Pr.Pr;
 
@@ -35,7 +32,7 @@ public abstract class Stream<T> {
 
   public static <T, S> Stream<T> unfold(S z, Fn<S, Optional<Pr<T, S>>> f) {
     // we want to defer first step:
-    return defer(() -> unfoldEager(z, f));
+    return defer(IO(() -> unfoldEager(z, f)));
   }
 
   public static <T> Stream<T> Cons(T head, Stream<T> tail) {
@@ -49,6 +46,11 @@ public abstract class Stream<T> {
   @SafeVarargs
   public static <T> Stream<T> of(T... elements) {
     return ofAll(Arrays.asList(elements));
+  }
+
+  @SafeVarargs
+  public static <T> Stream<T> Stream(T... elements) {
+    return of(elements);
   }
 
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
@@ -67,9 +69,9 @@ public abstract class Stream<T> {
         .orElseGet(Stream::Nil);
   }
 
-  private static <T> Stream<T> defer(Fn0<Stream<T>> streamEval) {
+  private static <T> Stream<T> defer(IO<Stream<T>> streamEval) {
     // Defer is implemented in terms of concat (which is lazy)
-    return SConcat(Delay(streamEval), Pure(Nil()));
+    return SConcat(streamEval, Pure(Nil()));
   }
 
   // COMBINATOR METHODS:
@@ -88,6 +90,34 @@ public abstract class Stream<T> {
 
   public <R> IO<R> foldRight(R z, Fn2<T, R, R> f) {
     return foldRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
+  }
+
+  public <R> Stream<R> scanLeft(R z, Fn2<R, T, R> f) {
+    // Can we do better?
+    return defer(
+        foldLeft(Pr(Stream.<R>Nil(), z),
+                 (acc, elem) -> {
+                   final R r = f.ap(acc._2, elem);
+                   return Pr(Cons(r, acc._1), r);
+                 })
+            .map(Pr::_1)
+    );
+  }
+
+  public <R> Stream<R> scanRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
+
+    return defer(
+        this.foldRight(z.map(zz -> Pr(Stream.<R>Nil(), zz)),
+                       (elem, acc) -> acc
+                           .map(Pr::_1)
+                           .flatMap(accStr -> f.ap(elem, acc.map(Pr::_2))
+                               .map(r -> Pr(Cons(r, accStr), r))
+                           ))
+            .map(Pr::_1));
+  }
+
+  public <R> Stream<R> scanRight(R z, Fn2<T, R, R> f) {
+    return scanRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
   }
 
   static <T> Stream<T> SCons(IO<T> head, IO<Stream<T>> tail) {
@@ -157,7 +187,7 @@ class Concat<T> extends Stream<T> {
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
-    return transform((s1, s2) -> s1.foldRight(Suspend(() -> s2.foldRight(z, f)), f));
+    return transform((s1, s2) -> s1.foldRight(s2.foldRight(z, f), f));
   }
 
   private <U> IO<U> transform(Fn2<Stream<T>, Stream<T>, IO<U>> f) {

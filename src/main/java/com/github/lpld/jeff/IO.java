@@ -89,13 +89,11 @@ public abstract class IO<T> {
 
 @RequiredArgsConstructor
 class Delay<T> extends IO<T> {
-
   final Fn0<T> thunk;
 }
 
 @RequiredArgsConstructor
 class Suspend<T> extends IO<T> {
-
   final Fn0<IO<T>> resume;
 }
 
