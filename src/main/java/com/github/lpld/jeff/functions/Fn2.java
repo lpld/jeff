@@ -12,4 +12,9 @@ public interface Fn2<T1, T2, R> {
   default Fn2<T2, T1, R> swap() {
     return (t2, t1) -> ap(t1, t2);
   }
+
+  default <R2> Fn2<T1, T2, R2> andThen(Fn<R, R2> f2) {
+    return (t1, t2) -> f2.ap(ap(t1, t2));
+  }
+
 }

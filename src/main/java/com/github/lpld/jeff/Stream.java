@@ -50,16 +50,21 @@ public abstract class Stream<T> {
 
   @SafeVarargs
   public static <T> Stream<T> Stream(T... elements) {
-    return of(elements);
+    Stream<T> s = Nil();
+    for (int i = elements.length - 1; i >= 0; i--) {
+      s = Cons(elements[i], s);
+    }
+
+    return s;
   }
 
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
-    return unfold(
+    return defer(IO(() -> unfoldEager(
         elems.iterator(),
         iterator -> Optional.of(iterator)
             .filter(Iterator::hasNext)
             .map(it -> Pr(it.next(), it))
-    );
+    )));
   }
 
   // Unfold that eagerly evaluates the first step:
@@ -74,7 +79,7 @@ public abstract class Stream<T> {
     return SConcat(streamEval, Pure(Nil()));
   }
 
-  // COMBINATOR METHODS:
+  // INSTANCE METHODS:
 
   public abstract <U> Stream<U> flatMap(Fn<T, Stream<U>> f);
 
@@ -84,7 +89,11 @@ public abstract class Stream<T> {
 
   public abstract <U> Stream<U> mapEval(Fn<T, IO<U>> f);
 
-  public abstract <R> IO<R> foldLeft(R z, Fn2<R, T, R> f);
+  public abstract <R> IO<R> foldl(R z, Fn2<R, T, Optional<R>> f);
+
+  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
+    return foldl(z, f.andThen(Optional::of));
+  }
 
   public abstract <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f);
 
@@ -93,7 +102,6 @@ public abstract class Stream<T> {
   }
 
   public <R> Stream<R> scanLeft(R z, Fn2<R, T, R> f) {
-    // Can we do better?
     return defer(
         foldLeft(Pr(Stream.<R>Nil(), z),
                  (acc, elem) -> {
@@ -118,6 +126,37 @@ public abstract class Stream<T> {
 
   public <R> Stream<R> scanRight(R z, Fn2<T, R, R> f) {
     return scanRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
+  }
+
+  public Stream<T> append(T t) {
+    return Concat(this, Stream(t));
+  }
+
+  public IO<Boolean> exists(Fn<T, Boolean> p) {
+    return foldRight(Pure(false), (elem, searchMore) -> p.ap(elem) ? Pure(true) : searchMore);
+  }
+
+  public IO<Boolean> forall(Fn<T, Boolean> p) {
+    return foldRight(Pure(true), (elem, searchMore) -> p.ap(elem) ? searchMore : Pure(false));
+  }
+
+  public Stream<T> reverse() {
+    return defer(foldLeft(Nil(), (acc, t) -> Cons(t, acc)));
+  }
+
+  public Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure) {
+    return defer(foldl(
+        Pr(Stream.<T>Nil(), true),
+        (pr, elem) -> {
+          if (pr._2) {
+            final Boolean ok = p.ap(elem);
+            if (ok || includeFailure) {
+              return Optional.of(Pr(pr._1.append(elem), ok));
+            }
+          }
+          return Optional.empty();
+        }
+    ).map(Pr::_1));
   }
 
   static <T> Stream<T> SCons(IO<T> head, IO<Stream<T>> tail) {
@@ -148,8 +187,13 @@ class Cons<T> extends Stream<T> {
   }
 
   @Override
-  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
-    return transform((h, t) -> t.foldLeft(f.ap(z, h), f));
+  public <R> IO<R> foldl(R z, Fn2<R, T, Optional<R>> f) {
+    return transform(
+        (h, t) ->
+            f.ap(z, h)
+                .map(r -> t.foldl(r, f))
+                .orElseGet(() -> Pure(z))
+    );
   }
 
   @Override
@@ -181,8 +225,8 @@ class Concat<T> extends Stream<T> {
   }
 
   @Override
-  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
-    return transform((s1, s2) -> s1.foldLeft(z, f).flatMap(zz -> s2.foldLeft(zz, f)));
+  public <R> IO<R> foldl(R z, Fn2<R, T, Optional<R>> f) {
+    return transform((s1, s2) -> s1.foldl(z, f).flatMap(zz -> s2.foldl(zz, f)));
   }
 
   @Override
@@ -216,7 +260,7 @@ class Nil extends Stream<Object> {
   }
 
   @Override
-  public <R> IO<R> foldLeft(R z, Fn2<R, Object, R> f) {
+  public <R> IO<R> foldl(R z, Fn2<R, Object, Optional<R>> f) {
     return Pure(z);
   }
 

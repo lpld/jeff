@@ -58,6 +58,10 @@ public abstract class IO<T> {
     return flatMap(f.andThen(IO::Pure));
   }
 
+  public IO<Unit> toUnit() {
+    return map(any -> Unit.unit);
+  }
+
   public <U> IO<U> flatMap(Fn<T, IO<U>> f) {
     return new Bind<>(this, f);
   }
