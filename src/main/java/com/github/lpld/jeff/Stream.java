@@ -48,6 +48,10 @@ public abstract class Stream<T> {
     return ofAll(Arrays.asList(elements));
   }
 
+  public static <T> Stream<T> ofOptional(Optional<T> opt) {
+    return opt.map(Stream::of).orElse(Nil());
+  }
+
   @SafeVarargs
   public static <T> Stream<T> Stream(T... elements) {
     Stream<T> s = Nil();
@@ -56,6 +60,10 @@ public abstract class Stream<T> {
     }
 
     return s;
+  }
+
+  public static <T> Stream<T> eval(IO<T> io) {
+    return SCons(io, Pure(Nil()));
   }
 
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
@@ -74,7 +82,7 @@ public abstract class Stream<T> {
         .orElseGet(Stream::Nil);
   }
 
-  private static <T> Stream<T> defer(IO<Stream<T>> streamEval) {
+  static <T> Stream<T> defer(IO<Stream<T>> streamEval) {
     // Defer is implemented in terms of concat (which is lazy)
     return SConcat(streamEval, Pure(Nil()));
   }
@@ -145,18 +153,80 @@ public abstract class Stream<T> {
   }
 
   public Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure) {
-    return defer(foldl(
-        Pr(Stream.<T>Nil(), true),
-        (pr, elem) -> {
-          if (pr._2) {
-            final Boolean ok = p.ap(elem);
-            if (ok || includeFailure) {
-              return Optional.of(Pr(pr._1.append(elem), ok));
+    return defer(
+        foldl(
+            Pr(Stream.<T>Nil(), true),
+            (pr, elem) -> {
+              if (pr._2) { // means all previous elements did satisfy p
+                final Boolean take = p.ap(elem);
+                if (take || includeFailure) {
+                  return Optional.of(Pr(pr._1.append(elem), take));
+                }
+              }
+              return Optional.empty();
             }
-          }
-          return Optional.empty();
-        }
-    ).map(Pr::_1));
+        ).map(Pr::_1)
+    );
+  }
+
+  public Stream<T> takeWhile(Fn<T, Boolean> p) {
+    return takeWhile(p, false);
+  }
+
+  public Stream<T> dropWhile(Fn<T, Boolean> p) {
+    return defer(
+        foldLeft(Pr(Stream.<T>Nil(), true),
+                 // pr._2 means that all previous elements did satisfy p
+                 (pr, elem) -> pr._2 && p.ap(elem) ? pr : Pr(pr._1.append(elem), false)
+        ).map(Pr::_1)
+    );
+  }
+
+  public Stream<T> filter(Fn<T, Boolean> p) {
+    return defer(
+        foldLeft(Nil(), (acc, elem) -> p.ap(elem) ? acc.append(elem) : acc)
+    );
+  }
+
+  public Stream<T> tail() {
+    return defer(
+        foldLeft(
+            Pr(Stream.<T>Nil(), false),
+            (pr, elem) -> Pr(pr._2 ? pr._1.append(elem) : Nil(), true)
+        ).map(Pr::_1)
+    );
+  }
+
+  public Stream<T> head() {
+    return defer(
+        foldl(
+            Pr(Stream.<T>Nil(), false),
+            (pr, elem) -> pr._2 ? Optional.empty() : Optional.of(Pr(Stream(elem), true))
+        ).map(Pr::_1)
+    );
+  }
+
+  public abstract IO<Optional<T>> evalHead();
+
+  public Stream<T> take(int n) {
+    if (n < 0) {
+      throw new IllegalArgumentException(n + "");
+    }
+    if (n == 0) {
+      return Nil();
+    }
+    return Concat(head(), tail().take(n - 1));
+  }
+
+  public Stream<T> drop(int n) {
+    if (n < 0) {
+      throw new IllegalArgumentException(n + "");
+    }
+    return n == 0 ? this : tail().drop(n - 1);
+  }
+
+  IO<LList<T>> toLList() {
+    return foldRight(LNil.instance(), (el, l) -> l.prepend(el));
   }
 
   static <T> Stream<T> SCons(IO<T> head, IO<Stream<T>> tail) {
@@ -201,6 +271,11 @@ class Cons<T> extends Stream<T> {
     return transform((h, t) -> f.ap(h, t.foldRight(z, f)));
   }
 
+  @Override
+  public IO<Optional<T>> evalHead() {
+    return head.map(Optional::of);
+  }
+
   private <U> IO<U> transform(Fn2<T, Stream<T>, IO<U>> f) {
     return flatMap2(head, tail, f);
   }
@@ -232,6 +307,14 @@ class Concat<T> extends Stream<T> {
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
     return transform((s1, s2) -> s1.foldRight(s2.foldRight(z, f), f));
+  }
+
+  public IO<Optional<T>> evalHead() {
+    return stream1
+        .flatMap(Stream::evalHead)
+        .flatMap((Optional<T> opt) -> opt
+            .map(t -> Pure(Optional.of(t)))
+            .orElseGet(() -> stream2.flatMap(Stream::evalHead)));
   }
 
   private <U> IO<U> transform(Fn2<Stream<T>, Stream<T>, IO<U>> f) {
@@ -267,5 +350,10 @@ class Nil extends Stream<Object> {
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<Object, IO<R>, IO<R>> f) {
     return z;
+  }
+
+  @Override
+  public IO<Optional<Object>> evalHead() {
+    return Pure(Optional.empty());
   }
 }
