@@ -78,6 +78,16 @@ public class StreamTest {
   }
 
   @Test
+  public void testCollect() {
+    final Stream<Integer> stream = Nil();
+
+    stream
+        .take(1)
+        .toLList()
+        .run();
+  }
+
+  @Test
   public void testStreamEval() {
     assertThat(Stream.eval(Pure(5)).toLList().run(), equalTo(LList.of(5)));
 
@@ -91,7 +101,7 @@ public class StreamTest {
     final Stream<Integer> newStream = Cons(4, stream);
     assertThat(evaluated.get(), is(false));
 
-    final Optional<Integer> head = newStream.evalHead().run();
+    final LList<Integer> head = newStream.head().toLList().run();
     assertThat(evaluated.get(), is(false));
 
     final Stream<Integer> tail = newStream.tail();

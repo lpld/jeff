@@ -14,7 +14,6 @@ import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
-import static com.github.lpld.jeff.IOMethods.flatMap2;
 import static com.github.lpld.jeff.data.Pr.Pr;
 
 /**
@@ -97,13 +96,51 @@ public abstract class Stream<T> {
 
   public abstract <U> Stream<U> mapEval(Fn<T, IO<U>> f);
 
-  public abstract <R> IO<R> foldl(R z, Fn2<R, T, Optional<R>> f);
+  @RequiredArgsConstructor
+  public static class Collect<T> {
 
-  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
-    return foldl(z, f.andThen(Optional::of));
+    final T value;
+    final boolean over;
+    final int skipSteps;
+
+    public static <T> Collect<T> value(T t) {
+      return value(t, 0);
+    }
+
+    public static <T> Collect<T> value(T t, int skipSteps) {
+      return new Collect<>(t, false, skipSteps);
+    }
+
+    public static <T> Collect<T> value(T t, boolean over) {
+      return new Collect<>(t, over, 0);
+    }
+
+    public boolean skip() {
+      return skipSteps > 0;
+    }
+
+    public Collect<T> skipped() {
+      Validate.state(skipSteps > 0, "skipSteps == 0");
+      return skip(skipSteps - 1);
+    }
+
+    public Collect<T> skip(int newSkip) {
+      Validate.state(!over, "Cannot update skip when over=true");
+      Validate.arg(newSkip >= 0, "skipSteps must be > 0");
+      return new Collect<>(value, false, newSkip);
+    }
   }
 
+  public abstract <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f);
+
   public abstract <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f);
+
+  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
+    return collect(
+        Collect.value(z),
+        (r, t) -> Collect.value(f.ap(r, t))
+    ).map(c -> c.value);
+  }
 
   public <R> IO<R> foldRight(R z, Fn2<T, R, R> f) {
     return foldRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
@@ -152,20 +189,49 @@ public abstract class Stream<T> {
     return defer(foldLeft(Nil(), (acc, t) -> Cons(t, acc)));
   }
 
+  public Stream<T> drop(int i) {
+    Validate.arg(i >= 0, "i <= 0");
+    return
+        i == 0
+        ? this
+        : defer(collect(
+            Collect.value(Stream.<T>Nil(), i),
+            (acc, elem) -> Collect.value(acc.append(elem))
+        ).map(c -> c.value));
+  }
+
+  public Stream<T> tail() {
+    return drop(1);
+  }
+
+  public Stream<T> take(int i) {
+    Validate.arg(i >= 0, "i <= 0");
+    return
+        i == 0
+        ? Nil()
+        : defer(
+            collect(
+                Collect.value(Pr(i, Stream.<T>Nil())),
+                (col, elem) -> Collect.value(Pr(col._1 - 1, col._2.append(elem)), col._1 == 1)
+            ).map(c -> c.value._2)
+        );
+  }
+
+  public Stream<T> head() {
+    return take(1);
+  }
+
   public Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure) {
+
     return defer(
-        foldl(
-            Pr(Stream.<T>Nil(), true),
-            (pr, elem) -> {
-              if (pr._2) { // means all previous elements did satisfy p
-                final Boolean take = p.ap(elem);
-                if (take || includeFailure) {
-                  return Optional.of(Pr(pr._1.append(elem), take));
-                }
-              }
-              return Optional.empty();
+        collect(
+            Collect.value(Stream.<T>Nil()),
+            (acc, elem) -> {
+              final Boolean take = p.ap(elem);
+              final Stream<T> newStream = take || includeFailure ? acc.append(elem) : acc;
+              return Collect.value(newStream, take);
             }
-        ).map(Pr::_1)
+        ).map(c -> c.value)
     );
   }
 
@@ -175,10 +241,14 @@ public abstract class Stream<T> {
 
   public Stream<T> dropWhile(Fn<T, Boolean> p) {
     return defer(
-        foldLeft(Pr(Stream.<T>Nil(), true),
-                 // pr._2 means that all previous elements did satisfy p
-                 (pr, elem) -> pr._2 && p.ap(elem) ? pr : Pr(pr._1.append(elem), false)
-        ).map(Pr::_1)
+        collect(
+            Collect.value(Pr(true, Stream.<T>Nil())),
+            (pr, elem) -> {
+              final boolean drop = pr._1 && p.ap(elem);
+              final Stream<T> newStream = drop ? pr._2 : pr._2.append(elem);
+              return Collect.value(Pr(drop, newStream));
+            })
+            .map(c -> c.value._2)
     );
   }
 
@@ -186,43 +256,6 @@ public abstract class Stream<T> {
     return defer(
         foldLeft(Nil(), (acc, elem) -> p.ap(elem) ? acc.append(elem) : acc)
     );
-  }
-
-  public Stream<T> tail() {
-    return defer(
-        foldLeft(
-            Pr(Stream.<T>Nil(), false),
-            (pr, elem) -> Pr(pr._2 ? pr._1.append(elem) : Nil(), true)
-        ).map(Pr::_1)
-    );
-  }
-
-  public Stream<T> head() {
-    return defer(
-        foldl(
-            Pr(Stream.<T>Nil(), false),
-            (pr, elem) -> pr._2 ? Optional.empty() : Optional.of(Pr(Stream(elem), true))
-        ).map(Pr::_1)
-    );
-  }
-
-  public abstract IO<Optional<T>> evalHead();
-
-  public Stream<T> take(int n) {
-    if (n < 0) {
-      throw new IllegalArgumentException(n + "");
-    }
-    if (n == 0) {
-      return Nil();
-    }
-    return Concat(head(), tail().take(n - 1));
-  }
-
-  public Stream<T> drop(int n) {
-    if (n < 0) {
-      throw new IllegalArgumentException(n + "");
-    }
-    return n == 0 ? this : tail().drop(n - 1);
   }
 
   IO<LList<T>> toLList() {
@@ -256,28 +289,31 @@ class Cons<T> extends Stream<T> {
                  tail.map(t -> t.mapEval(f)));
   }
 
+
   @Override
-  public <R> IO<R> foldl(R z, Fn2<R, T, Optional<R>> f) {
-    return transform(
-        (h, t) ->
-            f.ap(z, h)
-                .map(r -> t.foldl(r, f))
-                .orElseGet(() -> Pure(z))
-    );
+  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f) {
+    if (initial.over) {
+      return Pure(initial);
+    }
+
+    if (initial.skip()) {
+      return Pure(initial.skipped());
+    }
+
+    return head.flatMap(h -> {
+      final Collect<R> collect = f.ap(initial.value, h);
+
+      if (collect.over) {
+        return Pure(collect);
+      }
+
+      return tail.flatMap(t -> t.collect(collect, f));
+    });
   }
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
-    return transform((h, t) -> f.ap(h, t.foldRight(z, f)));
-  }
-
-  @Override
-  public IO<Optional<T>> evalHead() {
-    return head.map(Optional::of);
-  }
-
-  private <U> IO<U> transform(Fn2<T, Stream<T>, IO<U>> f) {
-    return flatMap2(head, tail, f);
+    return head.flatMap(h -> f.ap(h, tail.flatMap(t -> t.foldRight(z, f))));
   }
 }
 
@@ -300,25 +336,24 @@ class Concat<T> extends Stream<T> {
   }
 
   @Override
-  public <R> IO<R> foldl(R z, Fn2<R, T, Optional<R>> f) {
-    return transform((s1, s2) -> s1.foldl(z, f).flatMap(zz -> s2.foldl(zz, f)));
+  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f) {
+    if (initial.over) {
+      return Pure(initial);
+    }
+
+    return stream1
+        .flatMap(s1 -> s1.collect(initial, f)
+            .flatMap(
+                col1 -> col1.over
+                        ? Pure(col1)
+                        : stream2.flatMap(s2 -> s2.collect(col1, f))
+            )
+        );
   }
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
-    return transform((s1, s2) -> s1.foldRight(s2.foldRight(z, f), f));
-  }
-
-  public IO<Optional<T>> evalHead() {
-    return stream1
-        .flatMap(Stream::evalHead)
-        .flatMap((Optional<T> opt) -> opt
-            .map(t -> Pure(Optional.of(t)))
-            .orElseGet(() -> stream2.flatMap(Stream::evalHead)));
-  }
-
-  private <U> IO<U> transform(Fn2<Stream<T>, Stream<T>, IO<U>> f) {
-    return flatMap2(stream1, stream2, f);
+    return stream1.flatMap(s1 -> s1.foldRight(stream2.flatMap(s2 -> s2.foldRight(z, f)), f));
   }
 }
 
@@ -343,17 +378,27 @@ class Nil extends Stream<Object> {
   }
 
   @Override
-  public <R> IO<R> foldl(R z, Fn2<R, Object, Optional<R>> f) {
-    return Pure(z);
+  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, Object, Collect<R>> f) {
+    return Pure(initial);
   }
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<Object, IO<R>, IO<R>> f) {
     return z;
   }
+}
 
-  @Override
-  public IO<Optional<Object>> evalHead() {
-    return Pure(Optional.empty());
+class Validate {
+
+  static void arg(boolean cond, String msg) {
+    if (!cond) {
+      throw new IllegalArgumentException(msg);
+    }
+  }
+
+  static void state(boolean cond, String msg) {
+    if (!cond) {
+      throw new IllegalStateException(msg);
+    }
   }
 }
