@@ -17,6 +17,11 @@ abstract class LList<T> {
     return this instanceof LCons;
   }
 
+  boolean isEmpty() {
+    return this instanceof LNil;
+  }
+
+  @SafeVarargs
   static <T> LList<T> of(T... ts) {
     LList<T> l = LNil.instance();
     for (int i = ts.length - 1; i >= 0; i--) {
@@ -54,11 +59,11 @@ class LNil extends LList<Object> {
 @EqualsAndHashCode(callSuper = false)
 @RequiredArgsConstructor
 class LCons<T> extends LList<T> {
-  final T value;
+  final T head;
   final LList<T> tail;
 
   @Override
   public String toString() {
-    return value + "::" + tail;
+    return head + "::" + tail;
   }
 }

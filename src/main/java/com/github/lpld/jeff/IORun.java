@@ -98,7 +98,7 @@ class ErrorHandlers<T> {
 
     while (h.isNotEmpty()) {
       final Optional<IO<T>> res =
-          ((LCons<Function<Throwable, Optional<IO<T>>>>) h).value.apply(t);
+          ((LCons<Function<Throwable, Optional<IO<T>>>>) h).head.apply(t);
 
       if (res.isPresent()) {
         return res.get();

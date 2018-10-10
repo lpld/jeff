@@ -12,4 +12,8 @@ public interface Fn<T, R> {
   default <R2> Fn<T, R2> andThen(Fn<R, R2> f2) {
     return t -> f2.ap(ap(t));
   }
+
+  static <T> Fn<T, T> id() {
+    return t -> t;
+  }
 }

@@ -3,6 +3,7 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Fn2;
+import com.github.lpld.jeff.functions.Fs2;
 
 import java.util.Arrays;
 import java.util.Iterator;
@@ -61,8 +62,9 @@ public abstract class Stream<T> {
     return s;
   }
 
-  public static <T> Stream<T> eval(IO<T> io) {
-    return SCons(io, Pure(Nil()));
+  @SafeVarargs
+  public static <T> Stream<T> eval(IO<T>... io) {
+    return of(io).mapEval(Fn.id());
   }
 
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
@@ -131,7 +133,11 @@ public abstract class Stream<T> {
     }
   }
 
-  public abstract <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f);
+  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f) {
+    return collectS(initial, (r, elem) -> elem.map(t -> f.ap(r, t)));
+  }
+
+  abstract <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<T>, IO<Collect<R>>> f);
 
   public abstract <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f);
 
@@ -194,9 +200,9 @@ public abstract class Stream<T> {
     return
         i == 0
         ? this
-        : defer(collect(
+        : defer(collectS(
             Collect.value(Stream.<T>Nil(), i),
-            (acc, elem) -> Collect.value(acc.append(elem))
+            (acc, elem) -> Pure(Collect.value(Concat(acc, eval(elem))))
         ).map(c -> c.value));
   }
 
@@ -210,9 +216,10 @@ public abstract class Stream<T> {
         i == 0
         ? Nil()
         : defer(
-            collect(
+            collectS(
                 Collect.value(Pr(i, Stream.<T>Nil())),
-                (col, elem) -> Collect.value(Pr(col._1 - 1, col._2.append(elem)), col._1 == 1)
+                (col, elem) -> Pure(
+                    Collect.value(Pr(col._1 - 1, Concat(col._2, eval(elem))), col._1 == 1))
             ).map(c -> c.value._2)
         );
   }
@@ -289,31 +296,31 @@ class Cons<T> extends Stream<T> {
                  tail.map(t -> t.mapEval(f)));
   }
 
-
   @Override
-  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f) {
+  <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<T>, IO<Collect<R>>> f) {
     if (initial.over) {
       return Pure(initial);
     }
 
     if (initial.skip()) {
-      return Pure(initial.skipped());
+      return tail.flatMap(t -> t.collectS(initial.skipped(), f));
     }
 
-    return head.flatMap(h -> {
-      final Collect<R> collect = f.ap(initial.value, h);
-
-      if (collect.over) {
-        return Pure(collect);
-      }
-
-      return tail.flatMap(t -> t.collect(collect, f));
-    });
+    return f.ap(initial.value, head)
+        .flatMap(collect -> collect.over
+                            ? Pure(collect)
+                            : tail.flatMap(t -> t.collectS(collect, f))
+        );
   }
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
     return head.flatMap(h -> f.ap(h, tail.flatMap(t -> t.foldRight(z, f))));
+  }
+
+  @Override
+  public String toString() {
+    return "Cons(" + head + "," + tail + ")";
   }
 }
 
@@ -336,17 +343,17 @@ class Concat<T> extends Stream<T> {
   }
 
   @Override
-  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f) {
+  <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<T>, IO<Collect<R>>> f) {
     if (initial.over) {
       return Pure(initial);
     }
 
     return stream1
-        .flatMap(s1 -> s1.collect(initial, f)
+        .flatMap(s1 -> s1.collectS(initial, f)
             .flatMap(
                 col1 -> col1.over
                         ? Pure(col1)
-                        : stream2.flatMap(s2 -> s2.collect(col1, f))
+                        : stream2.flatMap(s2 -> s2.collectS(col1, f))
             )
         );
   }
@@ -354,6 +361,11 @@ class Concat<T> extends Stream<T> {
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
     return stream1.flatMap(s1 -> s1.foldRight(stream2.flatMap(s2 -> s2.foldRight(z, f)), f));
+  }
+
+  @Override
+  public String toString() {
+    return "Concat(" + stream1 + "," + stream2 + ")";
   }
 }
 
@@ -377,14 +389,24 @@ class Nil extends Stream<Object> {
     return instance();
   }
 
+//  @Override
+//  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, Object, Collect<R>> f) {
+//    return Pure(initial);
+//  }
+
   @Override
-  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, Object, Collect<R>> f) {
+  <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<Object>, IO<Collect<R>>> f) {
     return Pure(initial);
   }
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<Object, IO<R>, IO<R>> f) {
     return z;
+  }
+
+  @Override
+  public String toString() {
+    return "Nil";
   }
 }
 

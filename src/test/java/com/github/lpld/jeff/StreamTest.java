@@ -2,7 +2,8 @@ package com.github.lpld.jeff;
 
 import org.junit.Test;
 
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +14,7 @@ import static com.github.lpld.jeff.IO.Pure;
 import static com.github.lpld.jeff.Stream.Concat;
 import static com.github.lpld.jeff.Stream.Cons;
 import static com.github.lpld.jeff.Stream.Nil;
+import static com.github.lpld.jeff.Stream.SCons;
 import static com.github.lpld.jeff.Stream.Stream;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.instanceOf;
@@ -26,25 +28,44 @@ import static org.junit.Assert.assertThat;
 public class StreamTest {
 
   // Stream(1, 2, 3, 4, 5)
-  private static List<Stream<Integer>> streams = Arrays.asList(
-      Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil()))))),
+  private static List<Stream<Integer>> streams = buildStreams(1, 2, 3, 4, 5);
 
-      Concat(Cons(1, Cons(2, Nil())),
-             Cons(3, Cons(4, Cons(5, Nil())))),
+  @SafeVarargs
+  private static <T> List<Stream<T>> buildStreams(T... values) {
+    LList<IO<T>> v = LNil.instance();
+    for (int i = values.length - 1; i >= 0; i--) {
+      v = v.prepend(Pure(values[i]));
+    }
+    return buildStreams(v);
+  }
 
-      Concat(Nil(),
-             Concat(Cons(1, Cons(2, Nil())),
-                    Cons(3, Cons(4, Cons(5, Nil()))))),
+  @SafeVarargs
+  private static <T> List<Stream<T>> buildStreams(IO<T>... values) {
+    return buildStreams(LList.of(values));
+  }
 
-      Concat(Concat(Cons(1, Cons(2, Nil())),
-                    Concat(Cons(3, Cons(4, Nil())),
-                           Concat(Cons(5, Nil()),
-                                  Nil()))),
-             Nil())
-  );
+  private static <T> List<Stream<T>> buildStreams(LList<IO<T>> values) {
+    final ArrayList<Stream<T>> list = new ArrayList<>();
+
+    if (values.isEmpty()) {
+      return Collections.singletonList(Nil());
+    }
+
+    final LCons<IO<T>> ios = (LCons<IO<T>>) values;
+    final IO<T> head = ((LCons<IO<T>>) values).head;
+
+    for (Stream<T> child : buildStreams(ios.tail)) {
+      list.add(SCons(head, Pure(child)));
+      list.add(Concat(Nil(), SCons(head, Pure(child))));
+      list.add(Concat(SCons(head, Pure(child)), Nil()));
+    }
+
+    return list;
+  }
 
   @Test
   public void testNil() {
+
     assertThat(Nil(), is(instanceOf(Nil.class)));
     assertThat(Nil().toLList().run(), is(equalTo(LList.of())));
   }
@@ -88,27 +109,103 @@ public class StreamTest {
   }
 
   @Test
+  public void testTake() {
+    for (Stream<Integer> stream : streams) {
+      assertThat(stream.take(0).toLList().run(), equalTo(LList.of()));
+      assertThat(stream.take(1).toLList().run(), equalTo(LList.of(1)));
+      assertThat(stream.take(5).toLList().run(), equalTo(LList.of(1, 2, 3, 4, 5)));
+      assertThat(stream.take(10).toLList().run(), equalTo(LList.of(1, 2, 3, 4, 5)));
+    }
+  }
+
+  @Test
+  public void testDrop() {
+    for (Stream<Integer> stream : streams) {
+      assertThat(stream.drop(0).toLList().run(), equalTo(LList.of(1, 2, 3, 4, 5)));
+      assertThat(stream.drop(1).toLList().run(), equalTo(LList.of(2, 3, 4, 5)));
+      assertThat(stream.drop(2).toLList().run(), equalTo(LList.of(3, 4, 5)));
+      assertThat(stream.drop(5).toLList().run(), equalTo(LList.of()));
+      assertThat(stream.drop(10).toLList().run(), equalTo(LList.of()));
+    }
+  }
+
+  @Test
   public void testStreamEval() {
     assertThat(Stream.eval(Pure(5)).toLList().run(), equalTo(LList.of(5)));
+  }
 
+  @Test
+  public void testStreamEval1() {
     final AtomicBoolean evaluated = new AtomicBoolean();
-    final Stream<Integer> stream = Stream.eval(IO(() -> {
+    final IO<Integer> io = IO(() -> {
       evaluated.set(true);
-      return 5;
-    }));
+      return 4;
+    });
+    final Stream<Integer> str = SCons(Pure(3), Pure(SCons(io, Pure(SCons(Pure(6), Pure(Nil()))))));
+    str.tail().tail().toLList().run();
     assertThat(evaluated.get(), is(false));
+  }
 
-    final Stream<Integer> newStream = Cons(4, stream);
-    assertThat(evaluated.get(), is(false));
+  @Test
+  public void testStreamEval2() {
+    final AtomicBoolean evaluated4 = new AtomicBoolean();
+    final AtomicBoolean evaluated6 = new AtomicBoolean();
+    final IO<Integer> io4 = IO(() -> {
+      evaluated4.set(true);
+      return 4;
+    });
 
-    final LList<Integer> head = newStream.head().toLList().run();
-    assertThat(evaluated.get(), is(false));
+    final IO<Integer> io6 = IO(() -> {
+      evaluated6.set(true);
+      return 6;
+    });
 
-    final Stream<Integer> tail = newStream.tail();
-    assertThat(evaluated.get(), is(false));
+    for (Stream<Integer> stream : buildStreams(Pure(2), Pure(3), io4, Pure(5), io6, Pure(7))) {
+      evaluated4.set(false);
+      evaluated6.set(false);
 
-    assertThat(newStream.toLList().run(), equalTo(LList.of(4, 5)));
-    assertThat(evaluated.get(), is(true));
+      stream.head().toLList().run();
+      assertThat(evaluated4.get(), is(false));
+      assertThat(evaluated6.get(), is(false));
+
+      stream.tail().head().toLList().run();
+      assertThat(evaluated4.get(), is(false));
+      assertThat(evaluated6.get(), is(false));
+
+      stream.tail().tail().tail().head().toLList().run();
+      assertThat(evaluated4.get(), is(false));
+      assertThat(evaluated6.get(), is(false));
+
+      stream.drop(4).head().toLList().run();
+      assertThat(evaluated4.get(), is(false));
+      assertThat(evaluated6.get(), is(true));
+
+      evaluated6.set(false);
+      stream.drop(2).head().toLList().run();
+      assertThat(evaluated4.get(), is(true));
+      assertThat(evaluated6.get(), is(false));
+    }
+  }
+
+  @Test
+  public void testEval3() {
+    final AtomicBoolean evaluated = new AtomicBoolean();
+    final IO<Integer> io = IO(() -> {
+      evaluated.set(true);
+      return 1;
+    });
+
+    final Stream<Integer> stream = SCons(io, Pure(Cons(10, Nil())));
+
+    final Stream<Integer> newStream = stream.flatMap(i -> Stream(i, i + 1));
+
+    assertThat(newStream.drop(2).toLList().run(), equalTo(LList.of(10, 11)));
+
+    // the following assertion fails:
+    // assertThat(evaluated, is(false));
+
+    // but it looks that we cannot avoid it. we MUST evaluate `io` in order to execute drop(2),
+    // because otherwise we won't know the size of the stream.
   }
 
   @Test

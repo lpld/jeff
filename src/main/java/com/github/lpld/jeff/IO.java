@@ -94,16 +94,31 @@ public abstract class IO<T> {
 @RequiredArgsConstructor
 class Delay<T> extends IO<T> {
   final Fn0<T> thunk;
+
+  @Override
+  public String toString() {
+    return "Delay(.)";
+  }
 }
 
 @RequiredArgsConstructor
 class Suspend<T> extends IO<T> {
   final Fn0<IO<T>> resume;
+
+  @Override
+  public String toString() {
+    return "Suspend(.)";
+  }
 }
 
 @RequiredArgsConstructor
 class Pure<T> extends IO<T> {
   final T pure;
+
+  @Override
+  public String toString() {
+    return pure + "";
+  }
 }
 
 @RequiredArgsConstructor
@@ -121,4 +136,9 @@ class Recover<T> extends IO<T> {
 class Bind<T, U> extends IO<U> {
   final IO<T> source;
   final Fn<T, IO<U>> f;
+
+  @Override
+  public String toString() {
+    return "Bind(" + source + ", .)";
+  }
 }
