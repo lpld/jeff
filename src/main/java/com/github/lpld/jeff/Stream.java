@@ -1,13 +1,15 @@
 package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Fn2;
-import com.github.lpld.jeff.functions.Fs2;
 
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -15,173 +17,125 @@ import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
-import static com.github.lpld.jeff.data.Pr.Pr;
+import static com.github.lpld.jeff.IO.Suspend;
 
 /**
  * @author leopold
- * @since 5/10/18
+ * @since 10/10/18
  */
-@NoArgsConstructor(access = AccessLevel.PACKAGE)
 public abstract class Stream<T> {
-
-  // FACTORY METHODS:
 
   public static <T> Stream<T> Nil() {
     return Nil.instance();
   }
 
-  public static <T, S> Stream<T> unfold(S z, Fn<S, Optional<Pr<T, S>>> f) {
-    // we want to defer first step:
-    return defer(IO(() -> unfoldEager(z, f)));
+  public static <T> Stream<T> SCons(IO<T> head, Stream<T> tail) {
+    return new Cons<>(head, tail);
   }
 
   public static <T> Stream<T> Cons(T head, Stream<T> tail) {
-    return SCons(Pure(head), Pure(tail));
+    return SCons(Pure(head), tail);
   }
 
-  public static <T> Stream<T> Concat(Stream<T> s1, Stream<T> s2) {
-    return SConcat(Pure(s1), Pure(s2));
+  public static <T> Stream<T> Defer(IO<Stream<T>> stream) {
+    return new Defer<>(stream);
+  }
+
+  public static <T, S> Stream<T> unfold(S z, Fn<S, Optional<Pr<T, S>>> f) {
+    // we want to defer first step:
+    return Defer(IO(() -> unfoldEager(z, f)));
+  }
+
+
+  private static <T, M> Stream<T> fromList(List<M> list, Function<M, IO<T>> f) {
+    Stream<T> s = Nil();
+    for (int i = list.size() - 1; i >= 0; i--) {
+      s = SCons(f.apply(list.get(i)), s);
+    }
+    return s;
+  }
+
+  private static <T, M> Stream<T> fromIterable(Iterable<M> iterable, Function<M, IO<T>> f) {
+    return fromIterator(iterable.iterator(), f).run();
+  }
+
+  private static <T, M> IO<Stream<T>> fromIterator(Iterator<M> iterator, Function<M, IO<T>> f) {
+    return Suspend(() -> {
+
+      if (!iterator.hasNext()) {
+        return Pure(Nil());
+      }
+      final M next = iterator.next();
+      return fromIterator(iterator, f).map(s -> SCons(f.apply(next), s));
+    });
   }
 
   @SafeVarargs
   public static <T> Stream<T> of(T... elements) {
-    return ofAll(Arrays.asList(elements));
-  }
-
-  public static <T> Stream<T> ofOptional(Optional<T> opt) {
-    return opt.map(Stream::of).orElse(Nil());
+    return fromList(Arrays.asList(elements), IO::Pure);
   }
 
   @SafeVarargs
   public static <T> Stream<T> Stream(T... elements) {
-    Stream<T> s = Nil();
-    for (int i = elements.length - 1; i >= 0; i--) {
-      s = Cons(elements[i], s);
-    }
-
-    return s;
+    return of(elements);
   }
 
   @SafeVarargs
-  public static <T> Stream<T> eval(IO<T>... io) {
-    return of(io).mapEval(Fn.id());
+  public static <T> Stream<T> eval(IO<T>... ios) {
+    return fromList(Arrays.asList(ios), Function.identity());
   }
 
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
-    return defer(IO(() -> unfoldEager(
-        elems.iterator(),
-        iterator -> Optional.of(iterator)
-            .filter(Iterator::hasNext)
-            .map(it -> Pr(it.next(), it))
-    )));
+    return elems instanceof List ? fromList(((List<T>) elems), IO::Pure)
+                                 : fromIterable(elems, IO::Pure);
   }
 
   // Unfold that eagerly evaluates the first step:
   private static <T, S> Stream<T> unfoldEager(S z, Fn<S, Optional<Pr<T, S>>> f) throws Throwable {
     return f.ap(z)
-        .map(p -> SCons(Pure(p._1), IO(() -> unfoldEager(p._2, f))))
+        .map(p -> SCons(Pure(p._1), Defer(IO(() -> unfoldEager(p._2, f)))))
         .orElseGet(Stream::Nil);
   }
 
-  static <T> Stream<T> defer(IO<Stream<T>> streamEval) {
-    // Defer is implemented in terms of concat (which is lazy)
-    return SConcat(streamEval, Pure(Nil()));
-  }
-
-  // INSTANCE METHODS:
-
-  public abstract <U> Stream<U> flatMap(Fn<T, Stream<U>> f);
-
-  public <U> Stream<U> map(Fn<T, U> f) {
-    return flatMap(f.andThen(Stream::of));
-  }
-
-  public abstract <U> Stream<U> mapEval(Fn<T, IO<U>> f);
-
-  @RequiredArgsConstructor
-  public static class Collect<T> {
-
-    final T value;
-    final boolean over;
-    final int skipSteps;
-
-    public static <T> Collect<T> value(T t) {
-      return value(t, 0);
-    }
-
-    public static <T> Collect<T> value(T t, int skipSteps) {
-      return new Collect<>(t, false, skipSteps);
-    }
-
-    public static <T> Collect<T> value(T t, boolean over) {
-      return new Collect<>(t, over, 0);
-    }
-
-    public boolean skip() {
-      return skipSteps > 0;
-    }
-
-    public Collect<T> skipped() {
-      Validate.state(skipSteps > 0, "skipSteps == 0");
-      return skip(skipSteps - 1);
-    }
-
-    public Collect<T> skip(int newSkip) {
-      Validate.state(!over, "Cannot update skip when over=true");
-      Validate.arg(newSkip >= 0, "skipSteps must be > 0");
-      return new Collect<>(value, false, newSkip);
-    }
-  }
-
-  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, T, Collect<R>> f) {
-    return collectS(initial, (r, elem) -> elem.map(t -> f.ap(r, t)));
-  }
-
-  abstract <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<T>, IO<Collect<R>>> f);
-
   public abstract <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f);
-
-  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
-    return collect(
-        Collect.value(z),
-        (r, t) -> Collect.value(f.ap(r, t))
-    ).map(c -> c.value);
-  }
 
   public <R> IO<R> foldRight(R z, Fn2<T, R, R> f) {
     return foldRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
   }
 
-  public <R> Stream<R> scanLeft(R z, Fn2<R, T, R> f) {
-    return defer(
-        foldLeft(Pr(Stream.<R>Nil(), z),
-                 (acc, elem) -> {
-                   final R r = f.ap(acc._2, elem);
-                   return Pr(Cons(r, acc._1), r);
-                 })
-            .map(Pr::_1)
-    );
+  public abstract <R> IO<R> foldLeft(R z, Fn2<R, T, R> f);
+
+  public Stream<T> append(Stream<T> other) {
+    return Defer(foldRight(other, Stream::Cons));
   }
 
-  public <R> Stream<R> scanRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
+  public abstract Stream<T> take(int n);
 
-    return defer(
-        this.foldRight(z.map(zz -> Pr(Stream.<R>Nil(), zz)),
-                       (elem, acc) -> acc
-                           .map(Pr::_1)
-                           .flatMap(accStr -> f.ap(elem, acc.map(Pr::_2))
-                               .map(r -> Pr(Cons(r, accStr), r))
-                           ))
-            .map(Pr::_1));
+  public abstract Stream<T> drop(int n);
+
+  public Stream<T> head() {
+    return take(1);
   }
 
-  public <R> Stream<R> scanRight(R z, Fn2<T, R, R> f) {
-    return scanRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
+  public Stream<T> tail() {
+    return drop(1);
   }
 
-  public Stream<T> append(T t) {
-    return Concat(this, Stream(t));
+  public abstract Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure);
+
+  public Stream<T> takeWhile(Fn<T, Boolean> p) {
+    return takeWhile(p, false);
   }
+
+  public abstract Stream<T> dropWhile(Fn<T, Boolean> p);
+
+  public abstract <U> Stream<U> flatMap(Fn<T, Stream<U>> f);
+
+  public abstract <U> Stream<U> map(Fn<T, U> f);
+
+  public abstract <U> Stream<U> mapEval(Fn<T, IO<U>> f);
+
+  public abstract Stream<T> filter(Fn<T, Boolean> p);
 
   public IO<Boolean> exists(Fn<T, Boolean> p) {
     return foldRight(Pure(false), (elem, searchMore) -> p.ap(elem) ? Pure(true) : searchMore);
@@ -192,89 +146,23 @@ public abstract class Stream<T> {
   }
 
   public Stream<T> reverse() {
-    return defer(foldLeft(Nil(), (acc, t) -> Cons(t, acc)));
+    return Defer(foldLeft(Stream.Nil(), (acc, elem) -> Cons(elem, acc)));
   }
 
-  public Stream<T> drop(int i) {
-    Validate.arg(i >= 0, "i <= 0");
-    return
-        i == 0
-        ? this
-        : defer(collectS(
-            Collect.value(Stream.<T>Nil(), i),
-            (acc, elem) -> Pure(Collect.value(Concat(acc, eval(elem))))
-        ).map(c -> c.value));
-  }
-
-  public Stream<T> tail() {
-    return drop(1);
-  }
-
-  public Stream<T> take(int i) {
-    Validate.arg(i >= 0, "i <= 0");
-    return
-        i == 0
-        ? Nil()
-        : defer(
-            collectS(
-                Collect.value(Pr(i, Stream.<T>Nil())),
-                (col, elem) -> Pure(
-                    Collect.value(Pr(col._1 - 1, Concat(col._2, eval(elem))), col._1 == 1))
-            ).map(c -> c.value._2)
-        );
-  }
-
-  public Stream<T> head() {
-    return take(1);
-  }
-
-  public Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure) {
-
-    return defer(
-        collect(
-            Collect.value(Stream.<T>Nil()),
-            (acc, elem) -> {
-              final Boolean take = p.ap(elem);
-              final Stream<T> newStream = take || includeFailure ? acc.append(elem) : acc;
-              return Collect.value(newStream, take);
-            }
-        ).map(c -> c.value)
-    );
-  }
-
-  public Stream<T> takeWhile(Fn<T, Boolean> p) {
-    return takeWhile(p, false);
-  }
-
-  public Stream<T> dropWhile(Fn<T, Boolean> p) {
-    return defer(
-        collect(
-            Collect.value(Pr(true, Stream.<T>Nil())),
-            (pr, elem) -> {
-              final boolean drop = pr._1 && p.ap(elem);
-              final Stream<T> newStream = drop ? pr._2 : pr._2.append(elem);
-              return Collect.value(Pr(drop, newStream));
-            })
-            .map(c -> c.value._2)
-    );
-  }
-
-  public Stream<T> filter(Fn<T, Boolean> p) {
-    return defer(
-        foldLeft(Nil(), (acc, elem) -> p.ap(elem) ? acc.append(elem) : acc)
-    );
+  public Stream<T> repeat() {
+    return append(Defer(IO(this::repeat)));
   }
 
   IO<LList<T>> toLList() {
     return foldRight(LNil.instance(), (el, l) -> l.prepend(el));
   }
 
-  static <T> Stream<T> SCons(IO<T> head, IO<Stream<T>> tail) {
-    return new Cons<>(head, tail);
-  }
+  <U> Stream<U> deferTransform(Function<Stream<T>, Stream<U>> conv) {
+    if (this instanceof Cons) {
+      return Defer(IO(() -> conv.apply(this)));
+    }
 
-  static <T> Stream<T> SConcat(IO<Stream<T>> s1, IO<Stream<T>> s2) {
-    return new Concat<>(s1, s2);
+    return conv.apply(this);
   }
 }
 
@@ -282,90 +170,115 @@ public abstract class Stream<T> {
 class Cons<T> extends Stream<T> {
 
   final IO<T> head;
-  final IO<Stream<T>> tail;
+  final Stream<T> tail;
+
+  @Override
+  public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
+    return head.flatMap(h -> f.ap(h, tail.foldRight(z, f)));
+  }
+
+  @Override
+  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
+    return head.flatMap(h -> tail.foldLeft(f.ap(z, h), f));
+  }
+
+  @Override
+  public Stream<T> filter(Fn<T, Boolean> p) {
+    return Defer(head.map(h -> p.ap(h) ? Cons(h, tail.filter(p)) : tail.filter(p)));
+  }
+
+  @Override
+  public Stream<T> take(int n) {
+    return n == 0 ? Nil() : SCons(head, tail.deferTransform(s -> s.take(n - 1)));
+  }
+
+  @Override
+  public Stream<T> drop(int n) {
+    return n == 0 ? this : tail.deferTransform(s -> s.drop(n - 1));
+  }
+
+  @Override
+  public Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure) {
+    return Defer(head.map(h -> p.ap(h) ? Cons(h, tail.takeWhile(p))
+                                       : includeFailure ? Cons(h, Nil())
+                                                        : Nil()
+    ));
+  }
+
+  @Override
+  public Stream<T> dropWhile(Fn<T, Boolean> p) {
+    return Defer(head.map(h -> p.ap(h) ? tail.dropWhile(p) : this));
+  }
 
   @Override
   public <U> Stream<U> flatMap(Fn<T, Stream<U>> f) {
-    return SConcat(head.map(f),
-                   tail.map(s -> s.flatMap(f)));
+    return Defer(head.map(h -> f.ap(h).append(tail.flatMap(f))));
+  }
+
+  @Override
+  public <U> Stream<U> map(Fn<T, U> f) {
+    return SCons(head.map(f), tail.deferTransform(s -> s.map(f)));
   }
 
   @Override
   public <U> Stream<U> mapEval(Fn<T, IO<U>> f) {
-    return SCons(head.flatMap(f),
-                 tail.map(t -> t.mapEval(f)));
-  }
-
-  @Override
-  <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<T>, IO<Collect<R>>> f) {
-    if (initial.over) {
-      return Pure(initial);
-    }
-
-    if (initial.skip()) {
-      return tail.flatMap(t -> t.collectS(initial.skipped(), f));
-    }
-
-    return f.ap(initial.value, head)
-        .flatMap(collect -> collect.over
-                            ? Pure(collect)
-                            : tail.flatMap(t -> t.collectS(collect, f))
-        );
-  }
-
-  @Override
-  public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
-    return head.flatMap(h -> f.ap(h, tail.flatMap(t -> t.foldRight(z, f))));
-  }
-
-  @Override
-  public String toString() {
-    return "Cons(" + head + "," + tail + ")";
+    return SCons(head.flatMap(f), tail.deferTransform(s -> s.mapEval(f)));
   }
 }
 
 @RequiredArgsConstructor
-class Concat<T> extends Stream<T> {
+class Defer<T> extends Stream<T> {
 
-  final IO<Stream<T>> stream1;
-  final IO<Stream<T>> stream2;
+  final IO<Stream<T>> evalStream;
+
+  @Override
+  public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
+    return evalStream.flatMap(s -> s.foldRight(z, f));
+  }
+
+  @Override
+  public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
+    return evalStream.flatMap(s -> s.foldLeft(z, f));
+  }
+
+  @Override
+  public Stream<T> take(int n) {
+    return Defer(evalStream.map(s -> s.take(n)));
+  }
+
+  @Override
+  public Stream<T> drop(int n) {
+    return Defer(evalStream.map(s -> s.drop(n)));
+  }
+
+  @Override
+  public Stream<T> takeWhile(Fn<T, Boolean> p, boolean includeFailure) {
+    return Defer(evalStream.map(s -> s.takeWhile(p, includeFailure)));
+  }
+
+  @Override
+  public Stream<T> dropWhile(Fn<T, Boolean> p) {
+    return Defer(evalStream.map(s -> s.dropWhile(p)));
+  }
 
   @Override
   public <U> Stream<U> flatMap(Fn<T, Stream<U>> f) {
-    return SConcat(stream1.map(s -> s.flatMap(f)),
-                   stream2.map(s -> s.flatMap(f)));
+    return Defer(evalStream.map(s -> s.flatMap(f)));
+  }
+
+  @Override
+  public <U> Stream<U> map(Fn<T, U> f) {
+    return Defer(evalStream.map(s -> s.map(f)));
   }
 
   @Override
   public <U> Stream<U> mapEval(Fn<T, IO<U>> f) {
-    return SConcat(stream1.map(s -> s.mapEval(f)),
-                   stream2.map(s -> s.mapEval(f)));
+    return Defer(evalStream.map(s -> s.mapEval(f)));
   }
 
   @Override
-  <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<T>, IO<Collect<R>>> f) {
-    if (initial.over) {
-      return Pure(initial);
-    }
-
-    return stream1
-        .flatMap(s1 -> s1.collectS(initial, f)
-            .flatMap(
-                col1 -> col1.over
-                        ? Pure(col1)
-                        : stream2.flatMap(s2 -> s2.collectS(col1, f))
-            )
-        );
-  }
-
-  @Override
-  public <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f) {
-    return stream1.flatMap(s1 -> s1.foldRight(stream2.flatMap(s2 -> s2.foldRight(z, f)), f));
-  }
-
-  @Override
-  public String toString() {
-    return "Concat(" + stream1 + "," + stream2 + ")";
+  public Stream<T> filter(Fn<T, Boolean> p) {
+    return Defer(evalStream.map(s -> s.filter(p)));
   }
 }
 
@@ -380,7 +293,42 @@ class Nil extends Stream<Object> {
   }
 
   @Override
+  public <R> IO<R> foldRight(IO<R> z, Fn2<Object, IO<R>, IO<R>> f) {
+    return z;
+  }
+
+  @Override
+  public <R> IO<R> foldLeft(R z, Fn2<R, Object, R> f) {
+    return Pure(z);
+  }
+
+  @Override
+  public Stream<Object> take(int n) {
+    return instance();
+  }
+
+  @Override
+  public Stream<Object> drop(int n) {
+    return instance();
+  }
+
+  @Override
+  public Stream<Object> takeWhile(Fn<Object, Boolean> p, boolean includeFailure) {
+    return instance();
+  }
+
+  @Override
+  public Stream<Object> dropWhile(Fn<Object, Boolean> p) {
+    return instance();
+  }
+
+  @Override
   public <U> Stream<U> flatMap(Fn<Object, Stream<U>> f) {
+    return instance();
+  }
+
+  @Override
+  public <U> Stream<U> map(Fn<Object, U> f) {
     return instance();
   }
 
@@ -389,38 +337,8 @@ class Nil extends Stream<Object> {
     return instance();
   }
 
-//  @Override
-//  public <R> IO<Collect<R>> collect(Collect<R> initial, Fn2<R, Object, Collect<R>> f) {
-//    return Pure(initial);
-//  }
-
   @Override
-  <R> IO<Collect<R>> collectS(Collect<R> initial, Fs2<R, IO<Object>, IO<Collect<R>>> f) {
-    return Pure(initial);
-  }
-
-  @Override
-  public <R> IO<R> foldRight(IO<R> z, Fn2<Object, IO<R>, IO<R>> f) {
-    return z;
-  }
-
-  @Override
-  public String toString() {
-    return "Nil";
-  }
-}
-
-class Validate {
-
-  static void arg(boolean cond, String msg) {
-    if (!cond) {
-      throw new IllegalArgumentException(msg);
-    }
-  }
-
-  static void state(boolean cond, String msg) {
-    if (!cond) {
-      throw new IllegalStateException(msg);
-    }
+  public Stream<Object> filter(Fn<Object, Boolean> p) {
+    return instance();
   }
 }

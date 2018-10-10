@@ -1,5 +1,7 @@
 package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.LList.LCons;
+import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.functions.Fn;
 
 import java.util.Optional;
