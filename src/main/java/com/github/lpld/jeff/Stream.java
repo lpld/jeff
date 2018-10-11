@@ -232,6 +232,11 @@ class Cons<T> extends Stream<T> {
   public <U> Stream<U> mapEval(Fn<T, IO<U>> f) {
     return SCons(head.flatMap(f), tail.deferTransform(s -> s.mapEval(f)));
   }
+
+  @Override
+  public String toString() {
+    return "Cons(" + head + "," + tail + ")";
+  }
 }
 
 @RequiredArgsConstructor
@@ -287,6 +292,11 @@ class Defer<T> extends Stream<T> {
   @Override
   public Stream<T> filter(Fn<T, Boolean> p) {
     return Defer(evalStream.map(s -> s.filter(p)));
+  }
+
+  @Override
+  public String toString() {
+    return "Defer(" + evalStream + ")";
   }
 }
 
@@ -348,5 +358,10 @@ class Nil extends Stream<Object> {
   @Override
   public Stream<Object> filter(Fn<Object, Boolean> p) {
     return instance();
+  }
+
+  @Override
+  public String toString() {
+    return "Nil";
   }
 }

@@ -7,22 +7,22 @@ import lombok.RequiredArgsConstructor;
  * @author leopold
  * @since 6/10/18
  */
-public abstract class LList<T> {
+abstract class LList<T> {
 
-  public LList<T> prepend(T value) {
+  LList<T> prepend(T value) {
     return new LCons<>(value, this);
   }
 
-  public boolean isNotEmpty() {
+  boolean isNotEmpty() {
     return this instanceof LCons;
   }
 
-  public boolean isEmpty() {
+  boolean isEmpty() {
     return this instanceof LNil;
   }
 
   @SafeVarargs
-  public static <T> LList<T> of(T... ts) {
+  static <T> LList<T> of(T... ts) {
     LList<T> l = LNil.instance();
     for (int i = ts.length - 1; i >= 0; i--) {
       l = l.prepend(ts[i]);
@@ -30,12 +30,12 @@ public abstract class LList<T> {
     return l;
   }
 
-  public static class LNil extends LList<Object> {
+  static class LNil extends LList<Object> {
 
-    public static final LNil INSNTANCE = new LNil();
+    static final LNil INSNTANCE = new LNil();
 
     @SuppressWarnings("unchecked")
-    public static <T> LList<T> instance() {
+    static <T> LList<T> instance() {
       return (LList<T>) INSNTANCE;
     }
 
@@ -57,7 +57,7 @@ public abstract class LList<T> {
 
   @EqualsAndHashCode(callSuper = false)
   @RequiredArgsConstructor
-  public static class LCons<T> extends LList<T> {
+  static class LCons<T> extends LList<T> {
     final T head;
     final LList<T> tail;
 
