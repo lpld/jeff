@@ -3,7 +3,6 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -17,6 +16,7 @@ import java.util.function.BiConsumer;
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
 import static com.github.lpld.jeff.Stream.Cons;
+import static com.github.lpld.jeff.Stream.Defer;
 import static com.github.lpld.jeff.Stream.Nil;
 import static com.github.lpld.jeff.Stream.SCons;
 import static com.github.lpld.jeff.Stream.Stream;
@@ -80,23 +80,49 @@ public class StreamTest {
     final Stream<Integer> repeat = Stream(1, 2).repeat();
     assertThat(repeat.take(9).toLList().run(), equalTo(LList.of(1, 2, 1, 2, 1, 2, 1, 2, 1)));
 
-    final AtomicInteger counter = new AtomicInteger();
-    final Stream<Integer> ss = Stream.eval(IO(counter::incrementAndGet));
-//    ss.foldRight(ss, Stream::Cons);
-    ss.repeat().take(1).toLList().run();
-    assertThat(counter.get(), is(42));
+    final Stream<Integer> s = Defer(IO(() -> Stream(1).repeat()));
 
-    final Stream<Integer> stream1 = Cons(1, Stream(5).repeat().take(2)).repeat();
+    Cons(0, s).append(Cons(2, Nil()))
+        .take(1)
+        .toLList()
+        .run();
+
+    Stream(1).repeat().append(Stream(3))
+        .take(1)
+        .toLList()
+        .run();
+
+    Stream(1)
+        .flatMap(i -> Stream(2).repeat())
+        .take(1)
+        .toLList()
+        .run();//
+
+    final Stream<Integer> stream1 =
+        Cons(1, Stream(5).repeat().take(2).repeat().drop(17).take(2)).repeat();
+
     final LList<Integer> result = Stream(77).repeat()
         .flatMap(i -> stream1)
         .take(10)
         .toLList()
         .run();
+
     assertThat(result, equalTo(LList.of(1, 5, 5, 1, 5, 5, 1, 5, 5, 1)));
   }
 
+  // todo: fix this test
   @Test
-//  @Ignore("two following cases hang. Apparently drop/take algorithms should be revisited.")
+  public void testRepeatEval() {
+
+    final AtomicInteger counter = new AtomicInteger();
+    final Stream<Integer> ss = Stream.eval(IO(counter::incrementAndGet));
+    assertThat(ss.repeat().take(1).toLList().run(), equalTo(LList.of(1)));
+
+    // This fails:
+    assertThat(counter.get(), is(1));
+  }
+
+  @Test
   public void testRepeatDropTake() {
     Stream(1).repeat()
         .takeWhile(i -> i < 10)
@@ -109,6 +135,12 @@ public class StreamTest {
     Stream(1).repeat()
         .drop(1)
         .take(1)
+        .toLList()
+        .run();
+
+    Stream(1).repeat()
+        .filter(i -> i < 10)
+        .head()
         .toLList()
         .run();
   }

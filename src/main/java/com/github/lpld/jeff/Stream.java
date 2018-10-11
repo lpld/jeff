@@ -106,7 +106,15 @@ public abstract class Stream<T> {
   public abstract <R> IO<R> foldLeft(R z, Fn2<R, T, R> f);
 
   public Stream<T> append(Stream<T> other) {
-    return Defer(foldRight(other, Stream::Cons));
+    if (other instanceof Nil) {
+      return this;
+    }
+
+    if (this instanceof Nil) {
+      return other;
+    }
+
+    return Defer(foldRight(Pure(other), (elem, acc) -> Pure(Cons(elem, Defer(acc)))));
   }
 
   public abstract Stream<T> take(int n);
