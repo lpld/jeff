@@ -3,6 +3,7 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.functions.Fn;
+import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Fn2;
 
 import java.util.Arrays;
@@ -25,27 +26,91 @@ import static com.github.lpld.jeff.IO.Suspend;
  */
 public abstract class Stream<T> {
 
+  /**
+   * Create an empty stream
+   */
   public static <T> Stream<T> Nil() {
     return Nil.instance();
   }
 
+  /**
+   * Create a stream by combining an effectful head and a tail.
+   */
   public static <T> Stream<T> SCons(IO<T> head, Stream<T> tail) {
     return new Cons<>(head, tail);
   }
 
+  /**
+   * Create a stream by combining a head and a tail.
+   */
   public static <T> Stream<T> Cons(T head, Stream<T> tail) {
     return SCons(Pure(head), tail);
   }
 
-  public static <T> Stream<T> Defer(IO<Stream<T>> stream) {
-    return new Defer<>(stream);
+  /**
+   * Defer the evaluation of the stream.
+   */
+  public static <T> Stream<T> Defer(IO<Stream<T>> streamEval) {
+    return new Defer<>(streamEval);
   }
 
+  /**
+   * Shortcut for {@code Stream.Defer(IO.Delay(streamEval))}.
+   */
+  public static <T> Stream<T> Lazy(Fn0<Stream<T>> streamEval) {
+    return Defer(IO(streamEval));
+  }
+
+  /**
+   * Create a stream that consists of given elements.
+   */
+  @SafeVarargs
+  public static <T> Stream<T> of(T... elements) {
+    return fromList(Arrays.asList(elements), IO::Pure);
+  }
+
+  /**
+   * Shortcut for {@code Stream.of(elements)}
+   */
+  @SafeVarargs
+  public static <T> Stream<T> Stream(T... elements) {
+    return of(elements);
+  }
+
+  /**
+   * Create a stream that consists of given elements that are wrapped in IO effect and are
+   * possibly not evaluated yet.
+   */
+  @SafeVarargs
+  public static <T> Stream<T> eval(IO<T>... ios) {
+    return fromList(Arrays.asList(ios), Function.identity());
+  }
+
+  /**
+   * Create a stream of elements of a given iterable.
+   */
+  public static <T> Stream<T> ofAll(Iterable<T> elems) {
+    return elems instanceof List ? fromList(((List<T>) elems), IO::Pure)
+                                 : fromIterable(elems, IO::Pure);
+  }
+
+  /**
+   * General stream building function.
+   *
+   * It receives a seed value {@code z} and a function {@code f} that continuously evaluates
+   * next stream value along with a new state {@code z}. Stream generation is performed by
+   * applying the function {@code f} to the state from previous step until it returns
+   * {@code Optional.empty()}.
+   *
+   * The resulting stream is lazy, so this function can be used to produce infinite streams. For
+   * instance, this will generate endless stream containing all natural numbers starting from 0:
+   *
+   * {@code Stream.unfold(0, i -> Optional.of(Pr(i, i + 1)) }
+   */
   public static <T, S> Stream<T> unfold(S z, Fn<S, Optional<Pr<T, S>>> f) {
-    // we want to defer first step:
-    return Defer(IO(() -> unfoldEager(z, f)));
+    // we want to defer the first step:
+    return Lazy(() -> unfoldEager(z, f));
   }
-
 
   private static <T, M> Stream<T> fromList(List<M> list, Function<M, IO<T>> f) {
     Stream<T> s = Nil();
@@ -70,30 +135,10 @@ public abstract class Stream<T> {
     });
   }
 
-  @SafeVarargs
-  public static <T> Stream<T> of(T... elements) {
-    return fromList(Arrays.asList(elements), IO::Pure);
-  }
-
-  @SafeVarargs
-  public static <T> Stream<T> Stream(T... elements) {
-    return of(elements);
-  }
-
-  @SafeVarargs
-  public static <T> Stream<T> eval(IO<T>... ios) {
-    return fromList(Arrays.asList(ios), Function.identity());
-  }
-
-  public static <T> Stream<T> ofAll(Iterable<T> elems) {
-    return elems instanceof List ? fromList(((List<T>) elems), IO::Pure)
-                                 : fromIterable(elems, IO::Pure);
-  }
-
   // Unfold that eagerly evaluates the first step:
   private static <T, S> Stream<T> unfoldEager(S z, Fn<S, Optional<Pr<T, S>>> f) throws Throwable {
     return f.ap(z)
-        .map(p -> SCons(Pure(p._1), Defer(IO(() -> unfoldEager(p._2, f)))))
+        .map(p -> SCons(Pure(p._1), Lazy((() -> unfoldEager(p._2, f)))))
         .orElseGet(Stream::Nil);
   }
 
@@ -103,7 +148,17 @@ public abstract class Stream<T> {
     return foldRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
   }
 
+  /**
+   * Similar to foldRight, but does not evaluate elements
+   */
+  public abstract <R> IO<R> collectRight(IO<R> z, Fn2<IO<T>, IO<R>, IO<R>> f);
+
   public abstract <R> IO<R> foldLeft(R z, Fn2<R, T, R> f);
+
+  /**
+   * Similar to foldLeft, but does not evaluate elements
+   */
+  public abstract <R> IO<R> collectLeft(IO<R> z, Fn2<IO<R>, IO<T>, IO<R>> f);
 
   public Stream<T> append(Stream<T> other) {
     if (other instanceof Nil) {
@@ -114,7 +169,7 @@ public abstract class Stream<T> {
       return other;
     }
 
-    return Defer(foldRight(Pure(other), (elem, acc) -> Pure(Cons(elem, Defer(acc)))));
+    return Defer(collectRight(Pure(other), (elem, acc) -> Pure(SCons(elem, Defer(acc)))));
   }
 
   public abstract Stream<T> take(int n);
@@ -154,20 +209,20 @@ public abstract class Stream<T> {
   }
 
   public Stream<T> reverse() {
-    return Defer(foldLeft(Stream.Nil(), (acc, elem) -> Cons(elem, acc)));
+    return Defer(collectLeft(Pure(Nil()), (acc, elem) -> Pure(SCons(elem, Defer(acc)))));
   }
 
   public Stream<T> repeat() {
-    return append(Defer(IO(this::repeat)));
+    return append(Lazy(this::repeat));
   }
 
   IO<LList<T>> toLList() {
     return foldRight(LNil.instance(), (el, l) -> l.prepend(el));
   }
 
-  <U> Stream<U> deferTransform(Function<Stream<T>, Stream<U>> conv) {
+  <U> Stream<U> lazyTransform(Function<Stream<T>, Stream<U>> conv) {
     if (this instanceof Cons) {
-      return Defer(IO(() -> conv.apply(this)));
+      return Lazy(() -> conv.apply(this));
     }
 
     return conv.apply(this);
@@ -186,8 +241,18 @@ class Cons<T> extends Stream<T> {
   }
 
   @Override
+  public <R> IO<R> collectRight(IO<R> z, Fn2<IO<T>, IO<R>, IO<R>> f) {
+    return Suspend(() -> f.ap(head, tail.collectRight(z, f)));
+  }
+
+  @Override
   public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
     return head.flatMap(h -> tail.foldLeft(f.ap(z, h), f));
+  }
+
+  @Override
+  public <R> IO<R> collectLeft(IO<R> z, Fn2<IO<R>, IO<T>, IO<R>> f) {
+    return tail.collectLeft(Suspend(() -> f.ap(z, head)), f);
   }
 
   @Override
@@ -197,12 +262,12 @@ class Cons<T> extends Stream<T> {
 
   @Override
   public Stream<T> take(int n) {
-    return n == 0 ? Nil() : SCons(head, tail.deferTransform(s -> s.take(n - 1)));
+    return n == 0 ? Nil() : SCons(head, tail.lazyTransform(s -> s.take(n - 1)));
   }
 
   @Override
   public Stream<T> drop(int n) {
-    return n == 0 ? this : tail.deferTransform(s -> s.drop(n - 1));
+    return n == 0 ? this : tail.lazyTransform(s -> s.drop(n - 1));
   }
 
   @Override
@@ -225,12 +290,12 @@ class Cons<T> extends Stream<T> {
 
   @Override
   public <U> Stream<U> map(Fn<T, U> f) {
-    return SCons(head.map(f), tail.deferTransform(s -> s.map(f)));
+    return SCons(head.map(f), tail.lazyTransform(s -> s.map(f)));
   }
 
   @Override
   public <U> Stream<U> mapEval(Fn<T, IO<U>> f) {
-    return SCons(head.flatMap(f), tail.deferTransform(s -> s.mapEval(f)));
+    return SCons(head.flatMap(f), tail.lazyTransform(s -> s.mapEval(f)));
   }
 
   @Override
@@ -250,8 +315,18 @@ class Defer<T> extends Stream<T> {
   }
 
   @Override
+  public <R> IO<R> collectRight(IO<R> z, Fn2<IO<T>, IO<R>, IO<R>> f) {
+    return evalStream.flatMap(s -> s.collectRight(z, f));
+  }
+
+  @Override
   public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
     return evalStream.flatMap(s -> s.foldLeft(z, f));
+  }
+
+  @Override
+  public <R> IO<R> collectLeft(IO<R> z, Fn2<IO<R>, IO<T>, IO<R>> f) {
+    return evalStream.flatMap(s -> s.collectLeft(z, f));
   }
 
   @Override
@@ -312,6 +387,16 @@ class Nil extends Stream<Object> {
 
   @Override
   public <R> IO<R> foldRight(IO<R> z, Fn2<Object, IO<R>, IO<R>> f) {
+    return z;
+  }
+
+  @Override
+  public <R> IO<R> collectLeft(IO<R> z, Fn2<IO<R>, IO<Object>, IO<R>> f) {
+    return z;
+  }
+
+  @Override
+  public <R> IO<R> collectRight(IO<R> z, Fn2<IO<Object>, IO<R>, IO<R>> f) {
     return z;
   }
 

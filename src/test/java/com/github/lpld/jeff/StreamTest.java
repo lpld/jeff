@@ -2,6 +2,7 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
+import com.github.lpld.jeff.data.Pr;
 
 import org.junit.Test;
 
@@ -20,6 +21,7 @@ import static com.github.lpld.jeff.Stream.Defer;
 import static com.github.lpld.jeff.Stream.Nil;
 import static com.github.lpld.jeff.Stream.SCons;
 import static com.github.lpld.jeff.Stream.Stream;
+import static com.github.lpld.jeff.data.Pr.Pr;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.is;
@@ -60,9 +62,9 @@ public class StreamTest {
 
     for (Stream<T> child : buildStreams(ios.tail)) {
       list.add(SCons(head, child));
-//      list.add(SSnoc(Pure(child.reverse()), head).reverse());
-//      list.add(Concat(Nil(), SCons(head, Pure(child))));
-//      list.add(Concat(SCons(head, Pure(child)), Nil()));
+      list.add(SCons(head, Nil()).append(child));
+      list.add(SCons(head, child).reverse().reverse());
+      list.add(child.reverse().append(Stream.eval(head)).reverse());
     }
 
     return list;
@@ -73,6 +75,14 @@ public class StreamTest {
 
     assertThat(Nil(), is(instanceOf(Nil.class)));
     assertThat(Nil().toLList().run(), is(equalTo(LList.of())));
+  }
+
+  @Test
+  public void testAppend() {
+    final Stream<Integer> stream1 = Stream(1, 2, 3, 4, 5);
+    final Stream<Integer> stream2 = Cons(1, Nil()).append(Stream(2, 3, 4, 5));
+
+    assertThat(stream2.toLList().run(), equalTo(stream1.toLList().run()));
   }
 
   @Test
@@ -110,7 +120,6 @@ public class StreamTest {
     assertThat(result, equalTo(LList.of(1, 5, 5, 1, 5, 5, 1, 5, 5, 1)));
   }
 
-  // todo: fix this test
   @Test
   public void testRepeatEval() {
 
@@ -118,7 +127,6 @@ public class StreamTest {
     final Stream<Integer> ss = Stream.eval(IO(counter::incrementAndGet));
     assertThat(ss.repeat().take(1).toLList().run(), equalTo(LList.of(1)));
 
-    // This fails:
     assertThat(counter.get(), is(1));
   }
 
@@ -130,8 +138,6 @@ public class StreamTest {
         .toLList()
         .run();
 
-    // this looks rather simple, but it still hangs.
-    // it looks that our collectS method is not suitable for such operations
     Stream(1).repeat()
         .drop(1)
         .take(1)
@@ -216,13 +222,36 @@ public class StreamTest {
   }
 
   @Test
+  public void testStreamLazinessTakeDrop1() {
+    final AtomicBoolean evaluated = new AtomicBoolean();
+    final IO<Integer> io = IO(() -> {
+      evaluated.set(true);
+      return 1;
+    });
+
+    final AtomicBoolean evaluated2 = new AtomicBoolean();
+    final IO<Integer> io2 = IO(() -> {
+      evaluated2.set(true);
+      return 1;
+    });
+
+    Stream.eval(io, io2).append(Cons(2, Nil()))
+        .tail().tail()
+        .toLList()
+        .run();
+
+    assertThat(evaluated.get(), is(false));
+    assertThat(evaluated2.get(), is(false));
+  }
+
+  @Test
   public void testStreamLazinessTakeDrop() {
     final AtomicBoolean evaluated4 = new AtomicBoolean();
     final AtomicBoolean evaluated6 = new AtomicBoolean();
 
-    final BiConsumer<Boolean, Boolean> validate = (ev4, ev6) -> {
-      assertThat(evaluated4.get(), is(ev4));
-      assertThat(evaluated6.get(), is(ev6));
+    final BiConsumer<Stream<?>, Pr<Boolean, Boolean>> validateStream = (stream, pr) -> {
+      assertThat(stream.toString(), evaluated4.get(), is(pr._1));
+      assertThat(stream.toString(), evaluated6.get(), is(pr._2));
 
       evaluated4.set(false);
       evaluated6.set(false);
@@ -242,6 +271,9 @@ public class StreamTest {
         buildStreams(Pure(2), Pure(3), io4, Pure(5), io6, Pure(7));
 
     for (Stream<Integer> stream : streams) {
+      final BiConsumer<Boolean, Boolean> validate =
+          (v1, v2) -> validateStream.accept(stream, Pr(v1, v2));
+
       stream.head().toLList().run();
       validate.accept(false, false);
 
@@ -287,7 +319,7 @@ public class StreamTest {
     assertThat(newStream.drop(2).toLList().run(), equalTo(LList.of(10, 11)));
 
     // the following assertion fails:
-    // assertThat(evaluated, is(false));
+//     assertThat(evaluated, is(false));
 
     // but it looks that we cannot avoid it. we MUST evaluate `io` in order to execute drop(2),
     // because otherwise we won't know the size of the stream.
@@ -360,8 +392,4 @@ public class StreamTest {
 //      assertThat(list, is(equalTo(LList.of(5, 4, 3, 2, 1))));
 //    }
 //  }
-
-  public void testUnfold() {
-
-  }
 }
