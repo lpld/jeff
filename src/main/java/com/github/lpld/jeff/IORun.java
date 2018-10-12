@@ -25,7 +25,7 @@ final class IORun {
     final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
 
     while (true) {
-      // Recover, RaiseError, Suspend and Delay:
+      // Recover, Fail, Suspend and Delay:
       io = unfold(io, errorHandlers);
 
       // Pure:
@@ -64,8 +64,8 @@ final class IORun {
       if (io instanceof Recover) {
         errorHandlers.add(((Recover<T>) io).recover);
         io = ((Recover<T>) io).io;
-      } else if (io instanceof RaiseError) {
-        io = errorHandlers.tryHandle(((RaiseError<T>) io).t);
+      } else if (io instanceof Fail) {
+        io = errorHandlers.tryHandle(((Fail<T>) io).t);
       } else if (io instanceof Suspend) {
         try {
           io = ((Suspend<T>) io).resume.ap();

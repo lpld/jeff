@@ -3,15 +3,18 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
-import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Run;
+import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
+
+import static com.github.lpld.jeff.data.Or.Left;
 
 
 /**
@@ -24,7 +27,7 @@ import lombok.RequiredArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PACKAGE)
 public abstract class IO<T> {
 
-  public static <T> IO<T> IO(Fn0<T> action) {
+  public static <T> IO<T> IO(Xn0<T> action) {
     return Delay(action);
   }
 
@@ -34,15 +37,15 @@ public abstract class IO<T> {
 
   public static final IO<Unit> unit = Pure(Unit.unit);
 
-  public static <T> IO<T> Delay(Fn0<T> action) {
+  public static <T> IO<T> Delay(Xn0<T> action) {
     return new Delay<>(action);
   }
 
   public static IO<Unit> Delay(Run action) {
-    return Delay(action.toF0());
+    return Delay(action.toXn0());
   }
 
-  public static <T> IO<T> Suspend(Fn0<IO<T>> resume) {
+  public static <T> IO<T> Suspend(Xn0<IO<T>> resume) {
     return new Suspend<>(resume);
   }
 
@@ -50,8 +53,12 @@ public abstract class IO<T> {
     return new Pure<>(pure);
   }
 
-  public static <T> IO<T> RaiseError(Throwable t) {
-    return new RaiseError<>(t);
+  public static <T> IO<T> Fail(Throwable t) {
+    return new Fail<>(t);
+  }
+
+  public static IO<Unit> Fork(ExecutorService execotor) {
+    return new Fork(execotor);
   }
 
   public <U> IO<U> map(Fn<T, U> f) {
@@ -66,12 +73,12 @@ public abstract class IO<T> {
     return new Bind<>(this, f);
   }
 
-  public <U> IO<U> then(Fn0<IO<U>> f) {
-    return flatMap(t -> f.ap());
+  public <U> IO<U> chain(IO<U> io) {
+    return flatMap(t -> io);
   }
 
   public IO<Or<Throwable, T>> attempt() {
-    return map(Or::<Throwable, T>right).recover(t -> Optional.of(Or.left(t)));
+    return map(Or::<Throwable, T>Right).recover(t -> Optional.of(Left(t)));
   }
 
   public IO<T> recover(Function<Throwable, Optional<T>> r) {
@@ -93,7 +100,8 @@ public abstract class IO<T> {
 
 @RequiredArgsConstructor
 class Delay<T> extends IO<T> {
-  final Fn0<T> thunk;
+
+  final Xn0<T> thunk;
 
   @Override
   public String toString() {
@@ -103,7 +111,8 @@ class Delay<T> extends IO<T> {
 
 @RequiredArgsConstructor
 class Suspend<T> extends IO<T> {
-  final Fn0<IO<T>> resume;
+
+  final Xn0<IO<T>> resume;
 
   @Override
   public String toString() {
@@ -117,19 +126,29 @@ class Pure<T> extends IO<T> {
 
   @Override
   public String toString() {
-    return pure + "";
+    return "Pure(" + pure + ")";
   }
 }
 
 @RequiredArgsConstructor
-class RaiseError<T> extends IO<T> {
+class Fail<T> extends IO<T> {
   final Throwable t;
+
+  @Override
+  public String toString() {
+    return "Fail(" + t + ")";
+  }
 }
 
 @RequiredArgsConstructor
 class Recover<T> extends IO<T> {
   final IO<T> io;
   final Function<Throwable, Optional<IO<T>>> recover;
+
+  @Override
+  public String toString() {
+    return "Recover(" + io + ")";
+  }
 }
 
 @RequiredArgsConstructor
@@ -141,4 +160,10 @@ class Bind<T, U> extends IO<U> {
   public String toString() {
     return "Bind(" + source + ", .)";
   }
+}
+
+@RequiredArgsConstructor
+class Fork extends IO<Unit> {
+
+  final ExecutorService executor;
 }

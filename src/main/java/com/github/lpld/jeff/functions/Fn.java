@@ -7,7 +7,7 @@ package com.github.lpld.jeff.functions;
 @FunctionalInterface
 public interface Fn<T, R> {
 
-  R ap(T t) throws Throwable;
+  R ap(T t);
 
   default <R2> Fn<T, R2> andThen(Fn<R, R2> f2) {
     return t -> f2.ap(ap(t));

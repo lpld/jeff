@@ -12,12 +12,12 @@ import lombok.RequiredArgsConstructor;
 public abstract class Or<L, R> {
 
   @SuppressWarnings("unchecked")
-  public static <L, R> Or<L, R> left(L value) {
+  public static <L, R> Or<L, R> Left(L value) {
     return (Or<L, R>) new Left<>(value);
   }
 
   @SuppressWarnings("unchecked")
-  public static <L, R> Or<L, R> right(R value) {
+  public static <L, R> Or<L, R> Right(R value) {
     return (Or<L, R>) new Right<>(value);
   }
 }

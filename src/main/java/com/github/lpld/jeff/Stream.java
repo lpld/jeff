@@ -58,7 +58,7 @@ public abstract class Stream<T> {
    * Shortcut for {@code Stream.Defer(IO.Delay(streamEval))}.
    */
   public static <T> Stream<T> Lazy(Fn0<Stream<T>> streamEval) {
-    return Defer(IO(streamEval));
+    return Defer(IO(streamEval::ap));
   }
 
   /**
@@ -136,7 +136,7 @@ public abstract class Stream<T> {
   }
 
   // Unfold that eagerly evaluates the first step:
-  private static <T, S> Stream<T> unfoldEager(S z, Fn<S, Optional<Pr<T, S>>> f) throws Throwable {
+  private static <T, S> Stream<T> unfoldEager(S z, Fn<S, Optional<Pr<T, S>>> f) {
     return f.ap(z)
         .map(p -> SCons(Pure(p._1), Lazy((() -> unfoldEager(p._2, f)))))
         .orElseGet(Stream::Nil);

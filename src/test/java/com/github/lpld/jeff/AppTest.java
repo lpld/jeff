@@ -22,7 +22,7 @@ public class AppTest {
     for (int i = 1; i < 1000000; i++) {
       int finalI = i;
       io = io
-          .then(() -> IO(() -> finalI))
+          .map(x -> finalI)
           .flatMap(ii -> IO(() -> System.out.println(ii)));
     }
 
