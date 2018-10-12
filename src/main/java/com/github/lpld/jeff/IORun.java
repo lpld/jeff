@@ -2,13 +2,21 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
+import com.github.lpld.jeff.data.Futures;
+import com.github.lpld.jeff.data.Or;
+import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+
+import static com.github.lpld.jeff.data.Or.Left;
+import static com.github.lpld.jeff.data.Or.Right;
 
 /**
  * @author leopold
@@ -28,6 +36,10 @@ final class IORun {
       // Recover, Fail, Suspend and Delay:
       io = unfold(io, errorHandlers);
 
+      if (io instanceof Fork) {
+        return (T) Unit.unit;
+      }
+
       // Pure:
       if (io instanceof Pure) {
         return ((Pure<T>) io).pure;
@@ -37,25 +49,39 @@ final class IORun {
 
       // FlatMap:
       try {
-        io = applyFlatMap(((Bind<?, T>) io));
+        final Or<IO<T>, CompletableFuture<T>> result = applyFlatMap(((Bind<?, T>) io));
+        if (result.isLeft()) {
+          io = result.getLeft();
+        } else {
+          // todo: errors!
+          return result.getRight().get();
+        }
       } catch (Throwable t) {
         io = errorHandlers.tryHandle(t);
       }
     }
   }
 
-  private static <T, U, V> IO<U> applyFlatMap(Bind<T, U> fm) throws Throwable {
+  private static <T, U, V> Or<IO<U>, CompletableFuture<U>> applyFlatMap(Bind<T, U> fm)
+      throws Throwable {
     final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
     final Fn<T, IO<U>> f = fm.f;
     final IO<T> source = unfold(fm.source, errorHandlers);
 
+    if (source instanceof Fork) {
+      final ExecutorService executor = ((Fork) source).executor;
+      final Fn<Unit, IO<U>> ff = (Fn<Unit, IO<U>>) f;
+
+      return Right(Futures.run(() -> run(ff.ap(Unit.unit)), executor));
+    }
+
     if (source instanceof Pure) {
-      return f.ap(((Pure<T>) source).pure);
+      return Left(f.ap(((Pure<T>) source).pure));
     }
 
     assert source instanceof Bind;
     final Bind<V, T> fm2 = (Bind<V, T>) source;
-    return fm2.source.flatMap(a -> fm2.f.ap(a).flatMap(f));
+    return Left(fm2.source.flatMap(a -> fm2.f.ap(a).flatMap(f)));
   }
 
   private static <T> IO<T> unfold(IO<T> io, ErrorHandlers<T> errorHandlers) throws Throwable {

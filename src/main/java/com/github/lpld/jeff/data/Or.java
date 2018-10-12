@@ -1,6 +1,9 @@
 package com.github.lpld.jeff.data;
 
+import java.util.NoSuchElementException;
+
 import lombok.AccessLevel;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
@@ -19,6 +22,28 @@ public abstract class Or<L, R> {
   @SuppressWarnings("unchecked")
   public static <L, R> Or<L, R> Right(R value) {
     return (Or<L, R>) new Right<>(value);
+  }
+
+  public boolean isLeft() {
+    return this instanceof Left;
+  }
+
+  public boolean isRight() {
+    return this instanceof Right;
+  }
+
+  public L getLeft() {
+    if (isLeft()) {
+      return ((Left<L>) this).value;
+    }
+    throw new NoSuchElementException();
+  }
+
+  public R getRight() {
+    if (isRight()) {
+      return ((Right<R>) this).value;
+    }
+    throw new NoSuchElementException();
   }
 }
 
