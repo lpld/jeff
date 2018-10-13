@@ -110,4 +110,11 @@ public class IOTest {
 
     io.recover((th) -> th instanceof IOException ? Optional.of(22) : Optional.empty());
   }
+
+  @Test
+  public void testFork() {
+
+
+  }
+
 }

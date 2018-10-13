@@ -61,7 +61,7 @@ public abstract class IO<T> {
   }
 
   public static IO<Unit> Fork(ExecutorService executor) {
-    return new Fork(executor);
+    return Async(onFinish -> executor.submit(() -> onFinish.run(Right(Unit.unit))));
   }
 
   public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
@@ -103,7 +103,7 @@ public abstract class IO<T> {
 
   public T run() {
     try {
-      return IORun.run(this);
+      return IORun2.run(this);
     } catch (Throwable throwable) {
       return WrappedError.throwWrapped(throwable);
     }

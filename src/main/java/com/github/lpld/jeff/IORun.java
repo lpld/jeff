@@ -99,7 +99,7 @@ final class IORun {
 
     assert source instanceof Bind;
     final Bind<V, T> fm2 = (Bind<V, T>) source;
-    return Left(fm2.source.flatMap(a -> fm2.f.ap(a).flatMap(f)));
+    return Left(fm2.source.flatMap((V a) -> fm2.f.ap(a).flatMap(f)));
   }
 
   private static <T> CompletableFuture<T> runAsync(Async<T> async) {

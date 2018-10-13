@@ -28,11 +28,11 @@ public class IOTest {
 
     printThreadName
         .flatMap(x -> printThreadName
-            .chain(Fork(tp)))
+            .chain(Fork(tp))
+            .chain(printThreadName)
+        )
         .chain(printThreadName)
         .run();
-
-    Fork(tp).run();
 
     tp.shutdown();
 
