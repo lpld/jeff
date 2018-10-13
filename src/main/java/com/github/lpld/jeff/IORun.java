@@ -6,6 +6,7 @@ import com.github.lpld.jeff.data.Futures;
 import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
+import com.github.lpld.jeff.functions.Run1;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -15,6 +16,7 @@ import java.util.function.Function;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
+import static com.github.lpld.jeff.IO.Pure;
 import static com.github.lpld.jeff.data.Or.Left;
 import static com.github.lpld.jeff.data.Or.Right;
 
@@ -37,7 +39,17 @@ final class IORun {
       io = unfold(io, errorHandlers);
 
       if (io instanceof Fork) {
-        return (T) Unit.unit;
+        // todo: not sure about this...
+        // it might be not the last IO that we evaluate, because `run` method is called
+        // recursively now.
+
+        @SuppressWarnings("unchecked") final T unit = (T) Unit.unit;
+        return unit;
+      }
+
+      if (io instanceof Async) {
+
+        // todo: ????
       }
 
       // Pure:
@@ -49,12 +61,12 @@ final class IORun {
 
       // FlatMap:
       try {
-        final Or<IO<T>, CompletableFuture<T>> result = applyFlatMap(((Bind<?, T>) io));
+        final Or<IO<T>, CompletableFuture<IO<T>>> result = applyFlatMap(((Bind<?, T>) io));
         if (result.isLeft()) {
           io = result.getLeft();
         } else {
-          // todo: errors!
-          return result.getRight().get();
+          // todo: unwrap errors!
+          io = result.getRight().get();
         }
       } catch (Throwable t) {
         io = errorHandlers.tryHandle(t);
@@ -62,7 +74,7 @@ final class IORun {
     }
   }
 
-  private static <T, U, V> Or<IO<U>, CompletableFuture<U>> applyFlatMap(Bind<T, U> fm)
+  private static <T, U, V> Or<IO<U>, CompletableFuture<IO<U>>> applyFlatMap(Bind<T, U> fm)
       throws Throwable {
     final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
     final Fn<T, IO<U>> f = fm.f;
@@ -70,9 +82,30 @@ final class IORun {
 
     if (source instanceof Fork) {
       final ExecutorService executor = ((Fork) source).executor;
-      final Fn<Unit, IO<U>> ff = (Fn<Unit, IO<U>>) f;
 
-      return Right(Futures.run(() -> run(ff.ap(Unit.unit)), executor));
+      @SuppressWarnings("unchecked") final Fn<Unit, IO<U>> ff = (Fn<Unit, IO<U>>) f;
+
+      return Right(Futures.run(() -> Pure(run(ff.ap(Unit.unit))), executor));
+    }
+
+    if (source instanceof Async) {
+      final Run1<Run1<Or<Throwable, T>>> cb = ((Async<T>) source).cb;
+
+      final CompletableFuture<T> future = new CompletableFuture<>();
+      try {
+        cb.run(result -> {
+
+          if (result.isLeft()) {
+            future.completeExceptionally(result.getLeft());
+          } else {
+            future.complete(result.getRight());
+          }
+        });
+      } catch (Throwable ex) {
+        future.completeExceptionally(ex);
+      }
+
+      return Right(future.thenApply(f::ap));
     }
 
     if (source instanceof Pure) {
@@ -100,7 +133,7 @@ final class IORun {
         }
       } else if (io instanceof Delay) {
         try {
-          unfolded = IO.Pure(((Delay<T>) io).thunk.ap());
+          unfolded = Pure(((Delay<T>) io).thunk.ap());
         } catch (Throwable t) {
           unfolded = errorHandlers.tryHandle(t);
         }
@@ -110,7 +143,6 @@ final class IORun {
     }
     return unfolded;
   }
-
 }
 
 class ErrorHandlers<T> {

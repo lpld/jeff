@@ -6,20 +6,59 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.Recovery.on;
 import static com.github.lpld.jeff.Recovery.rules;
+import static com.github.lpld.jeff.data.Or.Left;
+import static com.github.lpld.jeff.data.Or.Right;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.junit.Assert.assertThat;
 
 public class AppTest {
 
   @Test
-//  @Ignore("stack overflow")
+  public void testAsync() {
+    final ExecutorService ex = Executors.newSingleThreadExecutor();
+    try {
+      final CompletableFuture<Integer> future =
+          CompletableFuture.supplyAsync(() -> {
+            try {
+              Thread.sleep(1000);
+            } catch (InterruptedException e) {
+              throw new IllegalArgumentException();
+            }
+            return 21;
+          });
+
+      final Integer res = IO.<Integer>Async(onFinish -> future.whenComplete(
+          (result, error) -> {
+            if (error == null) {
+              onFinish.run(Right(result));
+            } else {
+              onFinish.run(Left(error));
+            }
+          }
+      ))
+          .map(i -> i * 2)
+          .run();
+
+      assertThat(res, equalTo(42));
+
+    } finally {
+      ex.shutdown();
+    }
+  }
+
+  @Test
   public void flatMapTest() {
 
     IO<Unit> io = IO.unit;
 
-    for (int i = 1; i < 1000000; i++) {
+    for (int i = 1; i < 10000; i++) {
       int finalI = i;
       io = io
           .map(x -> finalI)

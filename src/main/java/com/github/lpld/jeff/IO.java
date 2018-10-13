@@ -3,7 +3,8 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
-import com.github.lpld.jeff.functions.Run;
+import com.github.lpld.jeff.functions.Run1;
+import com.github.lpld.jeff.functions.XRun;
 import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Optional;
@@ -31,7 +32,7 @@ public abstract class IO<T> {
     return Delay(action);
   }
 
-  public static IO<Unit> IO(Run action) {
+  public static IO<Unit> IO(XRun action) {
     return Delay(action);
   }
 
@@ -41,7 +42,7 @@ public abstract class IO<T> {
     return new Delay<>(action);
   }
 
-  public static IO<Unit> Delay(Run action) {
+  public static IO<Unit> Delay(XRun action) {
     return Delay(action.toXn0());
   }
 
@@ -57,8 +58,12 @@ public abstract class IO<T> {
     return new Fail<>(t);
   }
 
-  public static IO<Unit> Fork(ExecutorService execotor) {
-    return new Fork(execotor);
+  public static IO<Unit> Fork(ExecutorService executor) {
+    return new Fork(executor);
+  }
+
+  public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
+    return new Async<>(f);
   }
 
   public <U> IO<U> map(Fn<T, U> f) {
@@ -166,4 +171,16 @@ class Bind<T, U> extends IO<U> {
 class Fork extends IO<Unit> {
 
   final ExecutorService executor;
+}
+
+@RequiredArgsConstructor
+class Async<T> extends IO<T> {
+
+  // (Or<Throwable, T> => Unit) => Unit
+  final Run1<Run1<Or<Throwable, T>>> cb;
+
+  @Override
+  public String toString() {
+    return "Async(.)";
+  }
 }

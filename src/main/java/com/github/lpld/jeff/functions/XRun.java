@@ -6,7 +6,7 @@ import com.github.lpld.jeff.data.Unit;
  * @author leopold
  * @since 5/10/18
  */
-public interface Run {
+public interface XRun {
 
   void run() throws Throwable;
 

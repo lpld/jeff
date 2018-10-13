@@ -12,6 +12,9 @@ import java.util.concurrent.Executor;
 public final class Futures {
 
   public static <T> CompletableFuture<T> run(Xn0<T> run, Executor executor) {
+    // Arrr I hate JDK guys for this!
+    // Why not just CompletableFuture.supplyAsync(run::ap, executor) ???
+
     final CompletableFuture<T> future = new CompletableFuture<>();
     executor.execute(() -> {
       try {
