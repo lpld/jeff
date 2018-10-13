@@ -9,6 +9,8 @@ import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import lombok.AccessLevel;
@@ -16,6 +18,7 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.data.Or.Left;
+import static com.github.lpld.jeff.data.Or.Right;
 
 
 /**
@@ -24,7 +27,6 @@ import static com.github.lpld.jeff.data.Or.Left;
  * @author leopold
  * @since 4/10/18
  */
-@SuppressWarnings("WeakerAccess")
 @NoArgsConstructor(access = AccessLevel.PACKAGE)
 public abstract class IO<T> {
 
@@ -64,6 +66,11 @@ public abstract class IO<T> {
 
   public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
     return new Async<>(f);
+  }
+
+  public static IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
+    return Async(onFinish -> scheduler
+        .schedule(() -> onFinish.run(Right(Unit.unit)), millis, TimeUnit.MILLISECONDS));
   }
 
   public <U> IO<U> map(Fn<T, U> f) {

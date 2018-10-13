@@ -2,6 +2,7 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.data.Pr;
+import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Fn2;
@@ -10,6 +11,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
 import lombok.AccessLevel;
@@ -92,6 +94,10 @@ public abstract class Stream<T> {
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
     return elems instanceof List ? fromList(((List<T>) elems), IO::Pure)
                                  : fromIterable(elems, IO::Pure);
+  }
+
+  public static Stream<Unit> awakeEvery(ScheduledExecutorService scheduler, long millis) {
+    return Stream.eval(IO.sleep(scheduler, millis)).repeat();
   }
 
   /**
@@ -214,6 +220,13 @@ public abstract class Stream<T> {
 
   public Stream<T> repeat() {
     return append(Lazy(this::repeat));
+  }
+
+  /**
+   * Run all the effects in the stream!
+   */
+  public void drain() {
+    foldLeft(Unit.unit, (u, any) -> u).run();
   }
 
   IO<LList<T>> toLList() {

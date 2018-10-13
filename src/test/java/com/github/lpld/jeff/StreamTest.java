@@ -3,12 +3,15 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.data.Pr;
+import com.github.lpld.jeff.data.Unit;
 
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -368,6 +371,15 @@ public class StreamTest {
 
       assertThat(result, is(equalTo(LList.of(5, 4, 3, 2, 1))));
     }
+  }
+
+  @Test
+  public void testSleep() {
+    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    Stream.awakeEvery(scheduler, 500)
+        .take(10)
+        .mapEval(i -> Console.printLine("123"))
+        .drain();
   }
 
 //  @Test

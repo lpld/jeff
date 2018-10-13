@@ -48,8 +48,8 @@ final class IORun {
       }
 
       if (io instanceof Async) {
-
-        // todo: ????
+        // todo: errors??
+        return runAsync(((Async<T>) io)).get();
       }
 
       // Pure:
@@ -65,6 +65,7 @@ final class IORun {
         if (result.isLeft()) {
           io = result.getLeft();
         } else {
+          // todo: is it ok to block here?
           // todo: unwrap errors!
           io = result.getRight().get();
         }
@@ -89,23 +90,7 @@ final class IORun {
     }
 
     if (source instanceof Async) {
-      final Run1<Run1<Or<Throwable, T>>> cb = ((Async<T>) source).cb;
-
-      final CompletableFuture<T> future = new CompletableFuture<>();
-      try {
-        cb.run(result -> {
-
-          if (result.isLeft()) {
-            future.completeExceptionally(result.getLeft());
-          } else {
-            future.complete(result.getRight());
-          }
-        });
-      } catch (Throwable ex) {
-        future.completeExceptionally(ex);
-      }
-
-      return Right(future.thenApply(f::ap));
+      return Right(runAsync((Async<T>) source).thenApply(f::ap));
     }
 
     if (source instanceof Pure) {
@@ -115,6 +100,24 @@ final class IORun {
     assert source instanceof Bind;
     final Bind<V, T> fm2 = (Bind<V, T>) source;
     return Left(fm2.source.flatMap(a -> fm2.f.ap(a).flatMap(f)));
+  }
+
+  private static <T> CompletableFuture<T> runAsync(Async<T> async) {
+
+    final CompletableFuture<T> future = new CompletableFuture<>();
+    try {
+      async.cb.run(result -> {
+
+        if (result.isLeft()) {
+          future.completeExceptionally(result.getLeft());
+        } else {
+          future.complete(result.getRight());
+        }
+      });
+    } catch (Throwable ex) {
+      future.completeExceptionally(ex);
+    }
+    return future;
   }
 
   private static <T> IO<T> unfold(IO<T> io, ErrorHandlers<T> errorHandlers) throws Throwable {
