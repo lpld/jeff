@@ -1,7 +1,13 @@
 package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.LList.LCons;
+import com.github.lpld.jeff.LList.LNil;
+import com.github.lpld.jeff.data.Futures;
+
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 
 import static com.github.lpld.jeff.IO.Pure;
 
@@ -16,10 +22,13 @@ public class IORun2 {
   }
 
   private static <T, U, V> CompletableFuture<T> runAsyncInternal(IO<T> io) {
-//    System.out.println(1);
-
+    final ErrorHandlers<T> tHandlers = new ErrorHandlers<>();
     while (true) {
-      io = unwrap(io);
+      try {
+        io = unwrap(io, tHandlers);
+      } catch (Throwable err) {
+        return Futures.failed(err);
+      }
 
       if (io instanceof Pure) {
         return CompletableFuture.completedFuture(((Pure<T>) io).pure);
@@ -30,51 +39,72 @@ public class IORun2 {
         // todo: errors
       }
 
-      if (io instanceof Bind) {
-        final Bind<U, T> bind = (Bind<U, T>) io;
+      try {
+        if (io instanceof Bind) {
+          final Bind<U, T> bind = (Bind<U, T>) io;
 
-        final IO<U> source = unwrap(bind.source);
-        if (source instanceof Async) {
-          final CompletableFuture<U> promise = new CompletableFuture<>();
+          final ErrorHandlers<U> uHandlers = new ErrorHandlers<>();
 
-          // we want to register thenApply and thenCompose callbacks
-          // before the async callback is called, because we want to remain
-          // in async callback's thread. If we don't do this and if async callback
-          // is very short, we might call "thenApply" on a future that is already completed,
-          // and thenApply will be executed in current thread, which is not desirable behavior.
-          final CompletableFuture<T> result = promise
-              .thenApply(bind.f::ap)
-              .thenCompose(IORun2::runAsyncInternal);
-          executeAsync(promise, (Async<U>) source);
-          return result;
-          // todo: errors
+          final IO<U> source = unwrap(bind.source, uHandlers);
+
+          if (source instanceof Async) {
+            final CompletableFuture<U> promise = new CompletableFuture<>();
+
+            // we want to register `thenCompose` callback before the async callback is called,
+            // because we want to remain in async callback's thread. If we don't do this and if
+            // async callback is very short, we might call `thenCompose` on a future that is already
+            // completed, and `thenCompose` will be executed in current thread, which is not a
+            // desirable behavior.
+            final CompletableFuture<T> result =
+                promise.thenCompose(io1 -> runAsyncInternal(bind.f.ap(io1)));
+
+            executeAsync(promise, (Async<U>) source);
+            return result;
+            // todo: errors
+          }
+
+          if (source instanceof Pure) {
+            io = bind.f.ap(((Pure<U>) source).pure);
+          } else if (source instanceof Bind) {
+            final Bind<V, U> bind2 = (Bind<V, U>) source;
+            if (!uHandlers.isEmpty()) {
+              tHandlers.add(t -> uHandlers.handle(t).map(u -> u.flatMap(bind.f)));
+            }
+            io = bind2.source.flatMap(a -> bind2.f.ap(a).flatMap(bind.f));
+          }
         }
-
-        if (source instanceof Pure) {
-          io = bind.f.ap(((Pure<U>) source).pure);
-        } else if (source instanceof Bind) {
-          final Bind<V, U> bind2 = (Bind<V, U>) source;
-          io = bind2.source.flatMap(a -> bind2.f.ap(a).flatMap(bind.f));
+      } catch (Throwable err) {
+        try {
+          io = tHandlers.handleOrRethrow(err);
+        } catch (Throwable err2) {
+          return Futures.failed(err2);
         }
       }
     }
   }
 
   // Handle Suspend and Delay
-  private static <T> IO<T> unwrap(IO<T> io) {
-    try {
-      while (io instanceof Suspend) {
-        io = ((Suspend<T>) io).resume.ap();
-      }
+  private static <T> IO<T> unwrap(IO<T> io, ErrorHandlers<T> handlers) throws Throwable {
+    while (true) {
+      if (io instanceof Fail) {
+        io = handlers.handleOrRethrow(((Fail<T>) io).t);
+      } else if (io instanceof Recover) {
+        handlers.add(((Recover<T>) io).recover);
+        io = ((Recover<T>) io).io;
+      } else {
 
-      if (io instanceof Delay) {
-        io = Pure(((Delay<T>) io).thunk.ap());
+        try {
+          if (io instanceof Suspend) {
+            io = ((Suspend<T>) io).resume.ap();
+          } else if (io instanceof Delay) {
+            return Pure(((Delay<T>) io).thunk.ap());
+          } else {
+            return io;
+          }
+        } catch (Throwable err) {
+          handlers.handleOrRethrow(err);
+        }
       }
-
-      return io;
-    } catch (Throwable t) {
-      // todo: handle Fail and Recover cases.
-      return WrappedError.throwWrapped(t);
     }
   }
 
@@ -88,5 +118,44 @@ public class IORun2 {
       }
     });
     return promise;
+  }
+}
+
+class ErrorHandlers<T> {
+
+  @Override
+  public String toString() {
+    return "ErrorHandlers(" + (isEmpty() ? "<empty>" : "<rules>") + ")";
+  }
+
+  boolean isEmpty() {
+    return handlers.isEmpty();
+  }
+
+  private LList<Function<Throwable, Optional<IO<T>>>> handlers = LNil.instance();
+
+  void add(Function<Throwable, Optional<IO<T>>> handler) {
+    handlers = handlers.prepend(handler);
+  }
+
+  Optional<IO<T>> handle(Throwable err) {
+
+    LList<Function<Throwable, Optional<IO<T>>>> h = handlers;
+
+    while (h.isNotEmpty()) {
+      final Optional<IO<T>> res =
+          ((LCons<Function<Throwable, Optional<IO<T>>>>) h).head.apply(err);
+
+      if (res.isPresent()) {
+        return res;
+      }
+
+      h = ((LCons<Function<Throwable, Optional<IO<T>>>>) h).tail;
+    }
+    return Optional.empty();
+  }
+
+  IO<T> handleOrRethrow(Throwable err) throws Throwable {
+    return handle(err).orElseThrow(() -> err);
   }
 }

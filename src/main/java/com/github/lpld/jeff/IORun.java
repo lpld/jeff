@@ -6,7 +6,6 @@ import com.github.lpld.jeff.data.Futures;
 import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
-import com.github.lpld.jeff.functions.Run1;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -32,7 +31,7 @@ final class IORun {
    */
   static <T> T run(IO<T> io) throws Throwable {
 
-    final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
+    final ErrorHandlers1<T> errorHandlers = new ErrorHandlers1<>();
 
     while (true) {
       // Recover, Fail, Suspend and Delay:
@@ -77,7 +76,7 @@ final class IORun {
 
   private static <T, U, V> Or<IO<U>, CompletableFuture<IO<U>>> applyFlatMap(Bind<T, U> fm)
       throws Throwable {
-    final ErrorHandlers<T> errorHandlers = new ErrorHandlers<>();
+    final ErrorHandlers1<T> errorHandlers = new ErrorHandlers1<>();
     final Fn<T, IO<U>> f = fm.f;
     final IO<T> source = unfold(fm.source, errorHandlers);
 
@@ -120,7 +119,7 @@ final class IORun {
     return future;
   }
 
-  private static <T> IO<T> unfold(IO<T> io, ErrorHandlers<T> errorHandlers) throws Throwable {
+  private static <T> IO<T> unfold(IO<T> io, ErrorHandlers1<T> errorHandlers) throws Throwable {
     IO<T> unfolded = null;
     while (unfolded == null) {
       if (io instanceof Recover) {
@@ -148,7 +147,7 @@ final class IORun {
   }
 }
 
-class ErrorHandlers<T> {
+class ErrorHandlers1<T> {
 
   private LList<Function<Throwable, Optional<IO<T>>>> handlers = LNil.instance();
 

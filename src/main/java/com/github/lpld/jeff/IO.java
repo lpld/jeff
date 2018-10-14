@@ -61,7 +61,9 @@ public abstract class IO<T> {
   }
 
   public static IO<Unit> Fork(ExecutorService executor) {
-    return Async(onFinish -> executor.submit(() -> onFinish.run(Right(Unit.unit))));
+    return Async(onFinish -> executor.submit(() -> {
+      onFinish.run(Right(Unit.unit));
+    }));
   }
 
   public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
