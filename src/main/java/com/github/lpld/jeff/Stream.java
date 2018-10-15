@@ -6,6 +6,8 @@ import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Fn2;
+import com.github.lpld.jeff.functions.Xn;
+import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Arrays;
 import java.util.Iterator;
@@ -21,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
 import static com.github.lpld.jeff.IO.Suspend;
+import static com.github.lpld.jeff.data.Pr.Pr;
 
 /**
  * @author leopold
@@ -59,8 +62,8 @@ public abstract class Stream<T> {
   /**
    * Shortcut for {@code Stream.Defer(IO.Delay(streamEval))}.
    */
-  public static <T> Stream<T> Lazy(Fn0<Stream<T>> streamEval) {
-    return Defer(IO(streamEval::ap));
+  public static <T> Stream<T> Lazy(Xn0<Stream<T>> streamEval) {
+    return Defer(IO(streamEval));
   }
 
   /**
@@ -113,9 +116,13 @@ public abstract class Stream<T> {
    *
    * {@code Stream.unfold(0, i -> Optional.of(Pr(i, i + 1)) }
    */
-  public static <T, S> Stream<T> unfold(S z, Fn<S, Optional<Pr<T, S>>> f) {
+  public static <T, S> Stream<T> unfold(S z, Xn<S, Optional<Pr<T, S>>> f) {
     // we want to defer the first step:
     return Lazy(() -> unfoldEager(z, f));
+  }
+
+  public static <T> Stream<T> iterate(Xn0<Optional<T>> more) {
+    return unfold(Unit.unit, u -> more.ap().map(next -> Pr(next, Unit.unit)));
   }
 
   private static <T, M> Stream<T> fromList(List<M> list, Function<M, IO<T>> f) {
@@ -142,7 +149,7 @@ public abstract class Stream<T> {
   }
 
   // Unfold that eagerly evaluates the first step:
-  private static <T, S> Stream<T> unfoldEager(S z, Fn<S, Optional<Pr<T, S>>> f) {
+  private static <T, S> Stream<T> unfoldEager(S z, Xn<S, Optional<Pr<T, S>>> f) throws Throwable {
     return f.ap(z)
         .map(p -> SCons(Pure(p._1), Lazy((() -> unfoldEager(p._2, f)))))
         .orElseGet(Stream::Nil);

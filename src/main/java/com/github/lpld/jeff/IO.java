@@ -8,6 +8,8 @@ import com.github.lpld.jeff.functions.XRun;
 import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -105,10 +107,14 @@ public abstract class IO<T> {
 
   public T run() {
     try {
-      return IORun.run(this);
-    } catch (Throwable throwable) {
-      return WrappedError.throwWrapped(throwable);
+      return IORun.runAsync(this).get();
+    } catch (InterruptedException | ExecutionException err) {
+      return WrappedError.throwWrapped(err);
     }
+  }
+
+  public CompletableFuture<T> runAsync() {
+    return IORun.runAsync(this);
   }
 }
 
@@ -146,11 +152,12 @@ class Pure<T> extends IO<T> {
 
 @RequiredArgsConstructor
 class Fail<T> extends IO<T> {
-  final Throwable t;
+
+  final Throwable err;
 
   @Override
   public String toString() {
-    return "Fail(" + t + ")";
+    return "Fail(" + err + ")";
   }
 }
 
@@ -174,12 +181,6 @@ class Bind<T, U> extends IO<U> {
   public String toString() {
     return "Bind(" + source + ", .)";
   }
-}
-
-@RequiredArgsConstructor
-class Fork extends IO<Unit> {
-
-  final ExecutorService executor;
 }
 
 @RequiredArgsConstructor

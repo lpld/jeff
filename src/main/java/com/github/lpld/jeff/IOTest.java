@@ -1,9 +1,17 @@
 package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.data.Unit;
+import com.github.lpld.jeff.functions.Fn;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import static com.github.lpld.jeff.IO.Fail;
 import static com.github.lpld.jeff.IO.Fork;
@@ -11,6 +19,7 @@ import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
 import static com.github.lpld.jeff.Recovery.on;
 import static com.github.lpld.jeff.Recovery.rules;
+import static com.github.lpld.jeff.data.Unit.unit;
 
 /**
  * @author leopold
@@ -28,7 +37,7 @@ public class IOTest {
 
   }
 
-  public static void main(String[] args) {
+  public static void main3(String[] args) {
 
     final ExecutorService tp1 = Executors.newSingleThreadExecutor();
     final ExecutorService tp2 = Executors.newSingleThreadExecutor();
@@ -87,5 +96,23 @@ public class IOTest {
 //        .chain(Console.printLine(l))
 //    ).run();
 
+  }
+
+  public static void main(String[] args) {
+    // 
+//    Pure("a")
+//        .map(Fn.id())
+//        .chain(Fail(new IllegalArgumentException("3")))
+//        .recover(rules(on(IllegalArgumentException.class).doReturn("-- No such file --")))
+//        .map(Fn.id())
+//        .run();
+
+    Stream
+        .eval(IO(() -> Files.newBufferedReader(Paths.get("/home/lpld/.vimrc"))))
+        .flatMap(reader -> Stream.iterate(() -> Optional.ofNullable(reader.readLine())))
+        .foldLeft("", (l1, l2) -> l1 + "\n" + l2)
+        .recover(rules(on(NoSuchFileException.class).doReturn("-- No such file --")))
+        .flatMap(Console::printLine)
+        .run();
   }
 }

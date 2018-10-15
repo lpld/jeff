@@ -4,11 +4,12 @@ import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.data.Futures;
 
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
+
+import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.IO.Pure;
 
@@ -16,18 +17,14 @@ import static com.github.lpld.jeff.IO.Pure;
  * @author leopold
  * @since 13/10/18
  */
-public class IORun {
+class IORun {
 
-  public static <T> T run(IO<T> io) throws ExecutionException, InterruptedException {
-    return runAsyncInternal(io).get();
-  }
+  static <T, U, V> CompletableFuture<T> runAsync(IO<T> io) {
+    final BindStack<T> bindStack = new BindStack<>();
 
-  private static <T, U, V> CompletableFuture<T> runAsyncInternal(IO<T> io) {
-    final ErrorHandlers<T> tHandlers = new ErrorHandlers<>();
-    int nestedHandlers = 0;
     while (true) {
       try {
-        io = unwrap(io, tHandlers);
+        io = unwrap(io, bindStack);
       } catch (Throwable err) {
         return Futures.failed(err);
       }
@@ -37,21 +34,24 @@ public class IORun {
       }
 
       if (io instanceof Async) {
-        return handleAsyncErros(tHandlers, executeAsync(new CompletableFuture<>(), (Async<T>) io));
+        return handleAsyncErrors(executeAsync(new CompletableFuture<>(), (Async<T>) io), bindStack);
       }
 
-      boolean handlerAdded = false;
       try {
         if (io instanceof Bind) {
           final Bind<U, T> bind = (Bind<U, T>) io;
 
-          final ErrorHandlers<U> uHandlers = new ErrorHandlers<>();
+          final ErrorRulesHolder<U> uRules = new ErrorRulesHolder<>();
+          final IO<U> source = unwrap(bind.source, uRules);
 
-          final IO<U> source = unwrap(bind.source, uHandlers);
+          if (uRules.rules.isEmpty()) {
+            bindStack.push();
+          } else {
+            bindStack.pushWithRecovery(t -> uRules.tryHandle(t).map(u -> u.flatMap(bind.f)));
+          }
 
           if (source instanceof Async) {
-            final CompletableFuture<U> promise =
-                handleAsyncErros(uHandlers, new CompletableFuture<>());
+            final CompletableFuture<U> promise = new CompletableFuture<>();
 
             // we want to register `thenCompose` callback before the async callback is called,
             // because we want to remain in async callback's thread. If we don't do this and if
@@ -59,71 +59,67 @@ public class IORun {
             // completed, and `thenCompose` will be executed in current thread, which is not a
             // desirable behavior.
             final CompletableFuture<T> result =
-                promise.thenCompose(io1 -> runAsyncInternal(bind.f.ap(io1)));
+                promise.thenCompose(io1 -> runAsync(bind.f.ap(io1)));
 
             executeAsync(promise, (Async<U>) source);
-            return handleAsyncErros(tHandlers, result);
+            return handleAsyncErrors(result, bindStack);
           }
 
           if (source instanceof Pure) {
             io = bind.f.ap(((Pure<U>) source).pure);
           } else if (source instanceof Bind) {
             final Bind<V, U> bind2 = (Bind<V, U>) source;
-            if (!uHandlers.isEmpty()) {
-              tHandlers.add(t -> uHandlers.handle(t).map(u -> u.flatMap(bind.f)));
-              nestedHandlers++;
-              handlerAdded = true;
-            }
             io = bind2.source.flatMap(a -> bind2.f.ap(a).flatMap(bind.f));
           }
+        } else {
+          bindStack.remove();
         }
       } catch (Throwable err) {
-        try {
-          io = tHandlers.handleOrRethrow(err);
-        } catch (Throwable err2) {
-          return Futures.failed(err2);
-        }
-      }
+        final Optional<IO<T>> handleRes = bindStack.tryHandle(err);
 
-      if (!handlerAdded && nestedHandlers > 0) {
-        tHandlers.removeLast();
-        nestedHandlers--;
+        if (handleRes.isPresent()) {
+          io = handleRes.get();
+        } else {
+          return Futures.failed(err);
+        }
       }
     }
   }
 
-  private static <T> CompletableFuture<T> handleAsyncErros(ErrorHandlers<T> tHandlers,
-                                                           CompletableFuture<T> tAsync) {
+  private static <T> CompletableFuture<T> handleAsyncErrors(CompletableFuture<T> tAsync,
+                                                            ErrorHandler<T> handler) {
     return tAsync.handle((result, err) -> {
-      if (err != null) {
-        return Futures.run(() -> runAsyncInternal(tHandlers.handleOrRethrow(err)));
-      } else {
+      if (err == null) {
         return CompletableFuture.completedFuture(result);
+      } else {
+        // todo: what thread are we in??
+        return handler.tryHandle(err)
+            .map(IORun::runAsync)
+            .orElseGet(() -> Futures.failed(err));
       }
     }).thenCompose(Function.identity());
   }
 
-  // Handle Suspend and Delay
-  private static <T> IO<T> unwrap(IO<T> io, ErrorHandlers<T> handlers) throws Throwable {
+  /**
+   * Handle Fail, Recover, Suspend and Delay cases.
+   */
+  private static <T> IO<T> unwrap(IO<T> io, ErrorHandler<T> errorHandler) throws Throwable {
     while (true) {
-      if (io instanceof Fail) {
-        io = handlers.handleOrRethrow(((Fail<T>) io).t);
-      } else if (io instanceof Recover) {
-        handlers.add(((Recover<T>) io).recover);
-        io = ((Recover<T>) io).io;
-      } else {
-
-        try {
-          if (io instanceof Suspend) {
-            io = ((Suspend<T>) io).resume.ap();
-          } else if (io instanceof Delay) {
-            return Pure(((Delay<T>) io).thunk.ap());
-          } else {
-            return io;
-          }
-        } catch (Throwable err) {
-          handlers.handleOrRethrow(err);
+      try {
+        if (io instanceof Fail) {
+          throw ((Fail<T>) io).err;
+        } else if (io instanceof Recover) {
+          errorHandler.addRecoveryRule(((Recover<T>) io).recover);
+          io = ((Recover<T>) io).io;
+        } else if (io instanceof Suspend) {
+          io = ((Suspend<T>) io).resume.ap();
+        } else if (io instanceof Delay) {
+          return Pure(((Delay<T>) io).thunk.ap());
+        } else {
+          return io;
         }
+      } catch (Throwable err) {
+        io = errorHandler.tryHandle(err).orElseThrow(() -> err);
       }
     }
   }
@@ -141,49 +137,135 @@ public class IORun {
   }
 }
 
-class ErrorHandlers<T> {
+/**
+ * Entity that is capable of handling errors and transforming them into IO values of type `T`.
+ */
+interface ErrorHandler<T> {
+
+  Optional<IO<T>> tryHandle(Throwable err);
+
+  void addRecoveryRule(Function<Throwable, Optional<IO<T>>> rule);
+}
+
+/**
+ * Just a container for recovery rules.
+ */
+class ErrorRulesHolder<T> implements ErrorHandler<T> {
+
+  LList<Function<Throwable, Optional<IO<T>>>> rules = LNil.instance();
 
   @Override
-  public String toString() {
-    return "ErrorHandlers(" + (isEmpty() ? "<empty>" : "<rules>") + ")";
+  public void addRecoveryRule(Function<Throwable, Optional<IO<T>>> rule) {
+    rules = rules.prepend(rule);
   }
 
-  boolean isEmpty() {
-    return handlers.isEmpty();
-  }
+  @Override
+  public Optional<IO<T>> tryHandle(Throwable err) {
+    LList<Function<Throwable, Optional<IO<T>>>> rule = this.rules;
 
-  private LList<Function<Throwable, Optional<IO<T>>>> handlers = LNil.instance();
+    while (rule.isNotEmpty()) {
 
-  void add(Function<Throwable, Optional<IO<T>>> handler) {
-    handlers = handlers.prepend(handler);
-  }
+      final Optional<IO<T>> result =
+          ((LCons<Function<Throwable, Optional<IO<T>>>>) rule).head
+              .apply(err);
 
-  void removeLast() {
-    if (handlers.isEmpty()) {
-      throw new NoSuchElementException();
-    }
-
-    handlers = ((LCons<Function<Throwable, Optional<IO<T>>>>) handlers).tail;
-  }
-
-  Optional<IO<T>> handle(Throwable err) {
-
-    LList<Function<Throwable, Optional<IO<T>>>> h = handlers;
-
-    while (h.isNotEmpty()) {
-      final Optional<IO<T>> res =
-          ((LCons<Function<Throwable, Optional<IO<T>>>>) h).head.apply(err);
-
-      if (res.isPresent()) {
-        return res;
+      if (result.isPresent()) {
+        return result;
       }
 
-      h = ((LCons<Function<Throwable, Optional<IO<T>>>>) h).tail;
+      rule = ((LCons<Function<Throwable, Optional<IO<T>>>>) rule).tail;
     }
+
     return Optional.empty();
   }
+}
 
-  IO<T> handleOrRethrow(Throwable err) throws Throwable {
-    return handle(err).orElseThrow(() -> err);
+/**
+ * Stack for keeping track of `Bind` calls and managing error handlers.
+ *
+ * For efficiency this stack
+ */
+class BindStack<T> implements ErrorHandler<T> {
+
+  private StackItem<T> top = new Start<>();
+
+  /**
+   * Push new bind call.
+   */
+  void push() {
+    top.callsCount++;
   }
+
+  /**
+   * Push new bind call with recovery rule.
+   */
+  void pushWithRecovery(Function<Throwable, Optional<IO<T>>> rule) {
+    top = new Next<>(top);
+    top.addRecoveryRule(rule);
+  }
+
+  /**
+   * Remove the latest bind call.
+   */
+  void remove() {
+    if (top.callsCount > 0) {
+      top.callsCount--;
+    } else {
+      top = ((Next<T>) top).prev;
+    }
+  }
+
+  @Override
+  public void addRecoveryRule(Function<Throwable, Optional<IO<T>>> rule) {
+    top.addRecoveryRule(rule);
+  }
+
+  /**
+   * Find a rule that matches this error and apply it.
+   */
+  public Optional<IO<T>> tryHandle(Throwable err) {
+    StackItem<T> item = top;
+
+    while (item != null) {
+      final Optional<IO<T>> result = item.tryHandle(err);
+
+      if (result.isPresent()) {
+        return result;
+      }
+
+      item = item.hasPrev() ? ((Next<T>) item).prev : null;
+    }
+
+    return Optional.empty();
+  }
+}
+
+/**
+ * Item of a bind stack.
+ */
+abstract class StackItem<T>
+    extends ErrorRulesHolder<T>
+    implements ErrorHandler<T> {
+
+  int callsCount = 0;
+
+  boolean hasPrev() {
+    return this instanceof Next;
+  }
+}
+
+/**
+ * First item of BindStack, that doesn't have prev.
+ */
+class Start<T> extends StackItem<T> {
+
+}
+
+/**
+ * Item of BindStack that holds a reference to previous item.
+ */
+@RequiredArgsConstructor
+class Next<T> extends StackItem<T> {
+
+  final StackItem<T> prev;
 }
