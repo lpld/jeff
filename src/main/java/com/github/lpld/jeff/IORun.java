@@ -3,151 +3,145 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
 import com.github.lpld.jeff.data.Futures;
-import com.github.lpld.jeff.data.Or;
-import com.github.lpld.jeff.data.Unit;
-import com.github.lpld.jeff.functions.Fn;
 
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
-
 import static com.github.lpld.jeff.IO.Pure;
-import static com.github.lpld.jeff.data.Or.Left;
-import static com.github.lpld.jeff.data.Or.Right;
 
 /**
  * @author leopold
- * @since 6/10/18
+ * @since 13/10/18
  */
-@NoArgsConstructor(access = AccessLevel.PRIVATE)
-final class IORun {
+public class IORun {
 
-  /**
-   * Stack-safe evaluation of IO.
-   */
-  static <T> T run(IO<T> io) throws Throwable {
+  public static <T> T run(IO<T> io) throws ExecutionException, InterruptedException {
+    return runAsyncInternal(io).get();
+  }
 
-    final ErrorHandlers1<T> errorHandlers = new ErrorHandlers1<>();
-
+  private static <T, U, V> CompletableFuture<T> runAsyncInternal(IO<T> io) {
+    final ErrorHandlers<T> tHandlers = new ErrorHandlers<>();
+    int nestedHandlers = 0;
     while (true) {
-      // Recover, Fail, Suspend and Delay:
-      io = unfold(io, errorHandlers);
+      boolean handlerAdded = false;
+      try {
+        io = unwrap(io, tHandlers);
+      } catch (Throwable err) {
+        return Futures.failed(err);
+      }
 
-      if (io instanceof Fork) {
-        // todo: not sure about this...
-        // it might be not the last IO that we evaluate, because `run` method is called
-        // recursively now.
-
-        @SuppressWarnings("unchecked") final T unit = (T) Unit.unit;
-        return unit;
+      if (io instanceof Pure) {
+        return CompletableFuture.completedFuture(((Pure<T>) io).pure);
       }
 
       if (io instanceof Async) {
-        // todo: errors??
-        return runAsync(((Async<T>) io)).get();
+        return executeAsync(new CompletableFuture<>(), (Async<T>) io);
+        // todo: errors
       }
 
-      // Pure:
-      if (io instanceof Pure) {
-        return ((Pure<T>) io).pure;
-      }
-
-      assert io instanceof Bind;
-
-      // FlatMap:
       try {
-        final Or<IO<T>, CompletableFuture<IO<T>>> result = applyFlatMap(((Bind<?, T>) io));
-        if (result.isLeft()) {
-          io = result.getLeft();
-        } else {
-          // todo: is it ok to block here?
-          // todo: unwrap errors!
-          io = result.getRight().get();
+        if (io instanceof Bind) {
+          final Bind<U, T> bind = (Bind<U, T>) io;
+
+          final ErrorHandlers<U> uHandlers = new ErrorHandlers<>();
+
+          final IO<U> source = unwrap(bind.source, uHandlers);
+
+          if (source instanceof Async) {
+            final CompletableFuture<U> promise = new CompletableFuture<>();
+
+            // we want to register `thenCompose` callback before the async callback is called,
+            // because we want to remain in async callback's thread. If we don't do this and if
+            // async callback is very short, we might call `thenCompose` on a future that is already
+            // completed, and `thenCompose` will be executed in current thread, which is not a
+            // desirable behavior.
+            final CompletableFuture<T> result =
+                promise.thenCompose(io1 -> runAsyncInternal(bind.f.ap(io1)));
+
+            executeAsync(promise, (Async<U>) source);
+            return result;
+            // todo: errors
+          }
+
+          if (source instanceof Pure) {
+            io = bind.f.ap(((Pure<U>) source).pure);
+          } else if (source instanceof Bind) {
+            final Bind<V, U> bind2 = (Bind<V, U>) source;
+            final boolean addHandler = !uHandlers.isEmpty();
+            if (addHandler) {
+              tHandlers.add(t -> uHandlers.handle(t).map(u -> u.flatMap(bind.f)));
+              nestedHandlers++;
+              handlerAdded = true;
+            }
+            io = bind2.source.flatMap(a -> bind2.f.ap(a).flatMap(bind.f));
+          }
         }
-      } catch (Throwable t) {
-        io = errorHandlers.tryHandle(t);
+      } catch (Throwable err) {
+        try {
+          io = tHandlers.handleOrRethrow(err);
+        } catch (Throwable err2) {
+          return Futures.failed(err2);
+        }
+      }
+
+      if (!handlerAdded && nestedHandlers > 0) {
+        tHandlers.removeLast();
+        nestedHandlers--;
       }
     }
   }
 
-  private static <T, U, V> Or<IO<U>, CompletableFuture<IO<U>>> applyFlatMap(Bind<T, U> fm)
-      throws Throwable {
-    final ErrorHandlers1<T> errorHandlers = new ErrorHandlers1<>();
-    final Fn<T, IO<U>> f = fm.f;
-    final IO<T> source = unfold(fm.source, errorHandlers);
-
-    if (source instanceof Fork) {
-      final ExecutorService executor = ((Fork) source).executor;
-
-      @SuppressWarnings("unchecked") final Fn<Unit, IO<U>> ff = (Fn<Unit, IO<U>>) f;
-
-      return Right(Futures.run(() -> Pure(run(ff.ap(Unit.unit))), executor));
-    }
-
-    if (source instanceof Async) {
-      return Right(runAsync((Async<T>) source).thenApply(f::ap));
-    }
-
-    if (source instanceof Pure) {
-      return Left(f.ap(((Pure<T>) source).pure));
-    }
-
-    assert source instanceof Bind;
-    final Bind<V, T> fm2 = (Bind<V, T>) source;
-    return Left(fm2.source.flatMap((V a) -> fm2.f.ap(a).flatMap(f)));
-  }
-
-  private static <T> CompletableFuture<T> runAsync(Async<T> async) {
-
-    final CompletableFuture<T> future = new CompletableFuture<>();
-    try {
-      async.cb.run(result -> {
-
-        if (result.isLeft()) {
-          future.completeExceptionally(result.getLeft());
-        } else {
-          future.complete(result.getRight());
-        }
-      });
-    } catch (Throwable ex) {
-      future.completeExceptionally(ex);
-    }
-    return future;
-  }
-
-  private static <T> IO<T> unfold(IO<T> io, ErrorHandlers1<T> errorHandlers) throws Throwable {
-    IO<T> unfolded = null;
-    while (unfolded == null) {
-      if (io instanceof Recover) {
-        errorHandlers.add(((Recover<T>) io).recover);
+  // Handle Suspend and Delay
+  private static <T> IO<T> unwrap(IO<T> io, ErrorHandlers<T> handlers) throws Throwable {
+    while (true) {
+      if (io instanceof Fail) {
+        io = handlers.handleOrRethrow(((Fail<T>) io).t);
+      } else if (io instanceof Recover) {
+        handlers.add(((Recover<T>) io).recover);
         io = ((Recover<T>) io).io;
-      } else if (io instanceof Fail) {
-        io = errorHandlers.tryHandle(((Fail<T>) io).t);
-      } else if (io instanceof Suspend) {
-        try {
-          io = ((Suspend<T>) io).resume.ap();
-        } catch (Throwable t) {
-          io = errorHandlers.tryHandle(t);
-        }
-      } else if (io instanceof Delay) {
-        try {
-          unfolded = Pure(((Delay<T>) io).thunk.ap());
-        } catch (Throwable t) {
-          unfolded = errorHandlers.tryHandle(t);
-        }
       } else {
-        unfolded = io;
+
+        try {
+          if (io instanceof Suspend) {
+            io = ((Suspend<T>) io).resume.ap();
+          } else if (io instanceof Delay) {
+            return Pure(((Delay<T>) io).thunk.ap());
+          } else {
+            return io;
+          }
+        } catch (Throwable err) {
+          handlers.handleOrRethrow(err);
+        }
       }
     }
-    return unfolded;
+  }
+
+  private static <T> CompletableFuture<T> executeAsync(CompletableFuture<T> promise,
+                                                       Async<T> async) {
+    async.cb.run(result -> {
+      if (result.isLeft()) {
+        promise.completeExceptionally(result.getLeft());
+      } else {
+        promise.complete(result.getRight());
+      }
+    });
+    return promise;
   }
 }
 
-class ErrorHandlers1<T> {
+class ErrorHandlers<T> {
+
+  @Override
+  public String toString() {
+    return "ErrorHandlers(" + (isEmpty() ? "<empty>" : "<rules>") + ")";
+  }
+
+  boolean isEmpty() {
+    return handlers.isEmpty();
+  }
 
   private LList<Function<Throwable, Optional<IO<T>>>> handlers = LNil.instance();
 
@@ -155,19 +149,32 @@ class ErrorHandlers1<T> {
     handlers = handlers.prepend(handler);
   }
 
-  IO<T> tryHandle(Throwable t) throws Throwable {
+  void removeLast() {
+    if (handlers.isEmpty()) {
+      throw new NoSuchElementException();
+    }
+
+    handlers = ((LCons<Function<Throwable, Optional<IO<T>>>>) handlers).tail;
+  }
+
+  Optional<IO<T>> handle(Throwable err) {
+
     LList<Function<Throwable, Optional<IO<T>>>> h = handlers;
 
     while (h.isNotEmpty()) {
       final Optional<IO<T>> res =
-          ((LCons<Function<Throwable, Optional<IO<T>>>>) h).head.apply(t);
+          ((LCons<Function<Throwable, Optional<IO<T>>>>) h).head.apply(err);
 
       if (res.isPresent()) {
-        return res.get();
+        return res;
       }
 
       h = ((LCons<Function<Throwable, Optional<IO<T>>>>) h).tail;
     }
-    throw t;
+    return Optional.empty();
+  }
+
+  IO<T> handleOrRethrow(Throwable err) throws Throwable {
+    return handle(err).orElseThrow(() -> err);
   }
 }

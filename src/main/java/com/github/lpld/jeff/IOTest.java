@@ -19,11 +19,12 @@ import static com.github.lpld.jeff.Recovery.rules;
 public class IOTest {
 
   public static void main(String[] args) {
-    // todo!!! this hangs for some reason!!!
-    IO.<Integer>Fail(new IllegalArgumentException())
+    IO.<Integer>Fail(new IllegalArgumentException("1"))
         .map(i -> i * 55)
         .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
-        .chain(Fail(new IllegalArgumentException()))
+        .chain(Fail(new IllegalArgumentException("2")))
+//        .map(Object::toString)
+//        .recover(rules(on(IllegalArgumentException.class).doReturn(8)))
         .run();
   }
 

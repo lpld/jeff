@@ -105,7 +105,7 @@ public abstract class IO<T> {
 
   public T run() {
     try {
-      return IORun2.run(this);
+      return IORun.run(this);
     } catch (Throwable throwable) {
       return WrappedError.throwWrapped(throwable);
     }
