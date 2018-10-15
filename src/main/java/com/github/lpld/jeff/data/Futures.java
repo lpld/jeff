@@ -11,10 +11,18 @@ import java.util.concurrent.Executor;
  */
 public final class Futures {
 
-  public static <T> CompletableFuture<T> failed(Throwable t) {
+  public static <T> CompletableFuture<T> failed(Throwable err) {
     final CompletableFuture<T> future = new CompletableFuture<>();
-    future.completeExceptionally(t);
+    future.completeExceptionally(err);
     return future;
+  }
+
+  public static <T> CompletableFuture<T> run(Xn0<CompletableFuture<T>> run) {
+    try {
+      return run.ap();
+    } catch (Throwable err) {
+      return failed(err);
+    }
   }
 
   public static <T> CompletableFuture<T> run(Xn0<T> run, Executor executor) {
@@ -25,8 +33,8 @@ public final class Futures {
     executor.execute(() -> {
       try {
         future.complete(run.ap());
-      } catch (Throwable ex) {
-        future.completeExceptionally(ex);
+      } catch (Throwable err) {
+        future.completeExceptionally(err);
       }
     });
     return future;

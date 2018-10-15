@@ -26,7 +26,6 @@ public class IORun {
     final ErrorHandlers<T> tHandlers = new ErrorHandlers<>();
     int nestedHandlers = 0;
     while (true) {
-      boolean handlerAdded = false;
       try {
         io = unwrap(io, tHandlers);
       } catch (Throwable err) {
@@ -38,10 +37,10 @@ public class IORun {
       }
 
       if (io instanceof Async) {
-        return executeAsync(new CompletableFuture<>(), (Async<T>) io);
-        // todo: errors
+        return handleAsyncErros(tHandlers, executeAsync(new CompletableFuture<>(), (Async<T>) io));
       }
 
+      boolean handlerAdded = false;
       try {
         if (io instanceof Bind) {
           final Bind<U, T> bind = (Bind<U, T>) io;
@@ -51,7 +50,8 @@ public class IORun {
           final IO<U> source = unwrap(bind.source, uHandlers);
 
           if (source instanceof Async) {
-            final CompletableFuture<U> promise = new CompletableFuture<>();
+            final CompletableFuture<U> promise =
+                handleAsyncErros(uHandlers, new CompletableFuture<>());
 
             // we want to register `thenCompose` callback before the async callback is called,
             // because we want to remain in async callback's thread. If we don't do this and if
@@ -62,16 +62,14 @@ public class IORun {
                 promise.thenCompose(io1 -> runAsyncInternal(bind.f.ap(io1)));
 
             executeAsync(promise, (Async<U>) source);
-            return result;
-            // todo: errors
+            return handleAsyncErros(tHandlers, result);
           }
 
           if (source instanceof Pure) {
             io = bind.f.ap(((Pure<U>) source).pure);
           } else if (source instanceof Bind) {
             final Bind<V, U> bind2 = (Bind<V, U>) source;
-            final boolean addHandler = !uHandlers.isEmpty();
-            if (addHandler) {
+            if (!uHandlers.isEmpty()) {
               tHandlers.add(t -> uHandlers.handle(t).map(u -> u.flatMap(bind.f)));
               nestedHandlers++;
               handlerAdded = true;
@@ -92,6 +90,17 @@ public class IORun {
         nestedHandlers--;
       }
     }
+  }
+
+  private static <T> CompletableFuture<T> handleAsyncErros(ErrorHandlers<T> tHandlers,
+                                                           CompletableFuture<T> tAsync) {
+    return tAsync.handle((result, err) -> {
+      if (err != null) {
+        return Futures.run(() -> runAsyncInternal(tHandlers.handleOrRethrow(err)));
+      } else {
+        return CompletableFuture.completedFuture(result);
+      }
+    }).thenCompose(Function.identity());
   }
 
   // Handle Suspend and Delay
