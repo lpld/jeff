@@ -29,17 +29,24 @@ public class IOTest {
   }
 
   public static void main(String[] args) {
+
     final ExecutorService tp1 = Executors.newSingleThreadExecutor();
     final ExecutorService tp2 = Executors.newSingleThreadExecutor();
     final ExecutorService tp3 = Executors.newSingleThreadExecutor();
 
-    // todo: 2nd recover works in Sync mode (main2 method), but is ignored in async.
-    IO.<Integer>Fail(new IllegalArgumentException("1"))
-        .flatMap(i -> Fork(tp1).chain(Pure(i * 55)))
-        .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
-        .flatMap(i -> Fork(tp2).chain(Fail(new IllegalArgumentException("2"))))
+    // todo: doesn't work
+    Fork(tp1)
+        .chain(Fail(new IllegalArgumentException("3")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .run();
+//
+//    // todo: 2nd recover works in Sync mode (main2 method), but is ignored in async.
+//    IO.<Integer>Fail(new IllegalArgumentException("1"))
+//        .flatMap(i -> Fork(tp1).chain(Pure(i * 55)))
+//        .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
+//        .flatMap(i -> Fork(tp2).chain(Fail(new IllegalArgumentException("2"))))
+//        .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
+//        .run();
 
     tp1.shutdown();
     tp2.shutdown();
