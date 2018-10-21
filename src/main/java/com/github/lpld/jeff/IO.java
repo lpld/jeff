@@ -8,7 +8,6 @@ import com.github.lpld.jeff.functions.XRun;
 import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
@@ -107,14 +106,10 @@ public abstract class IO<T> {
 
   public T run() {
     try {
-      return IORun.runAsync(this).get();
+      return IORun.runAsync(this, new CallStack<>()).get();
     } catch (InterruptedException | ExecutionException err) {
       return WrappedError.throwWrapped(err);
     }
-  }
-
-  public CompletableFuture<T> runAsync() {
-    return IORun.runAsync(this);
   }
 }
 
