@@ -24,6 +24,11 @@ import static org.junit.Assert.assertThat;
 public class IOTest {
 
   @Test
+  public void testPure() {
+    
+  }
+
+  @Test
   public void testAsync() {
     final ExecutorService ex = Executors.newSingleThreadExecutor();
     try {
