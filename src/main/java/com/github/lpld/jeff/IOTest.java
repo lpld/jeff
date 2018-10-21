@@ -27,17 +27,19 @@ import static com.github.lpld.jeff.data.Unit.unit;
  */
 public class IOTest {
 
-  public static void main2(String[] args) {
+  public static void main(String[] args) {
     IO.<Integer>Fail(new IllegalArgumentException("1"))
-        .map(i -> i * 55)
+//        .map(i -> i * 55)
         .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
         .chain(Fail(new IllegalArgumentException("2")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
+        .map(Object::toString)
+        .flatMap(Console::printLine)
         .run();
 
   }
 
-  public static void main3(String[] args) {
+  public static void main2(String[] args) {
 
     final ExecutorService tp1 = Executors.newSingleThreadExecutor();
     final ExecutorService tp2 = Executors.newSingleThreadExecutor();
@@ -48,7 +50,7 @@ public class IOTest {
         .chain(Fail(new IllegalArgumentException("3")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .run();
-//
+
 //    // todo: 2nd recover works in Sync mode (main2 method), but is ignored in async.
 //    IO.<Integer>Fail(new IllegalArgumentException("1"))
 //        .flatMap(i -> Fork(tp1).chain(Pure(i * 55)))
@@ -98,8 +100,8 @@ public class IOTest {
 
   }
 
-  public static void main(String[] args) {
-    // 
+  public static void main0(String[] args) {
+    //
 //    Pure("a")
 //        .map(Fn.id())
 //        .chain(Fail(new IllegalArgumentException("3")))

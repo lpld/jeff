@@ -6,7 +6,6 @@ import com.github.lpld.jeff.data.Futures;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
 import lombok.RequiredArgsConstructor;
@@ -161,19 +160,17 @@ class ErrorRulesHolder<T> implements ErrorHandler<T> {
 
   @Override
   public Optional<IO<T>> tryHandle(Throwable err) {
-    LList<Function<Throwable, Optional<IO<T>>>> rule = this.rules;
+    while (rules.isNotEmpty()) {
 
-    while (rule.isNotEmpty()) {
-
-      final Optional<IO<T>> result =
-          ((LCons<Function<Throwable, Optional<IO<T>>>>) rule).head
+      final Optional<IO<T>> head =
+          ((LCons<Function<Throwable, Optional<IO<T>>>>) rules).head
               .apply(err);
 
-      if (result.isPresent()) {
-        return result;
-      }
+      rules = ((LCons<Function<Throwable, Optional<IO<T>>>>) rules).tail;
 
-      rule = ((LCons<Function<Throwable, Optional<IO<T>>>>) rule).tail;
+      if (head.isPresent()) {
+        return head;
+      }
     }
 
     return Optional.empty();
@@ -182,8 +179,6 @@ class ErrorRulesHolder<T> implements ErrorHandler<T> {
 
 /**
  * Stack for keeping track of `Bind` calls and managing error handlers.
- *
- * For efficiency this stack
  */
 class BindStack<T> implements ErrorHandler<T> {
 
@@ -224,18 +219,18 @@ class BindStack<T> implements ErrorHandler<T> {
    * Find a rule that matches this error and apply it.
    */
   public Optional<IO<T>> tryHandle(Throwable err) {
-    StackItem<T> item = top;
 
-    while (item != null) {
-      final Optional<IO<T>> result = item.tryHandle(err);
+    while (top != null) {
+      final Optional<IO<T>> result = top.tryHandle(err);
 
       if (result.isPresent()) {
         return result;
       }
 
-      item = item.hasPrev() ? ((Next<T>) item).prev : null;
+      top = top.hasPrev() ? ((Next<T>) top).prev : null;
     }
 
+    top = new Start<>();
     return Optional.empty();
   }
 }
@@ -251,6 +246,15 @@ abstract class StackItem<T>
 
   boolean hasPrev() {
     return this instanceof Next;
+  }
+
+  @Override
+  public Optional<IO<T>> tryHandle(Throwable err) {
+    final Optional<IO<T>> res = super.tryHandle(err);
+    if (res.isPresent()) {
+      this.callsCount = 0;
+    }
+    return res;
   }
 }
 
