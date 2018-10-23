@@ -1,5 +1,6 @@
 package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.generators.IOGen;
 import com.github.lpld.jeff.generators.Resources;
 import com.pholser.junit.quickcheck.Property;
@@ -10,13 +11,9 @@ import org.junit.Rule;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.Supplier;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertEquals;
 
 /**
  * @author leopold
@@ -34,93 +31,83 @@ public class IOProperties {
   }
 
   @Property
-  public <T> void pureValues(T v) {
-    final IO<T> pure = IO.Pure(v);
-    assertThat(pure.run(), equalTo(v));
-    assertThat(pure.run(), equalTo(v));
-  }
-
-  @Property
-  public <T> void delayValues(T v) {
-    final AtomicInteger i = new AtomicInteger();
-
-    final IO<T> io = IO.Delay(() -> {
-      i.incrementAndGet();
-      return v;
-    });
-
-    assertThat(i.get(), is(0));
-    assertThat(io.run(), is(v));
-    assertThat(i.get(), is(1));
-    assertThat(io.run(), is(v));
-    assertThat(i.get(), is(2));
-  }
-
-  @Property
-  public void fail(String message) {
-    final IO<?> fail = IO.Fail(new RuntimeException(message));
-    thrown.expect(RuntimeException.class);
-    thrown.expectMessage(message);
-    fail.run();
-  }
-
-  @Property
-  public <T> void pureRecover(T v1, T v2) {
-
-    T result = IO.Pure(v1)
-        .recover(err -> Optional.of(v2))
-        .run();
-
-    assertThat(result, is(v1));
-  }
-
-  @Property
-  public <T> void failRecover(T v) {
-
-    T result = IO.<T>Fail(new RuntimeException())
-        .recover(err -> Optional.of(v))
-        .run();
-
-    assertThat(result, is(v));
-  }
-
-  @Property
-  public <T> void failRecoverFail(T v) {
-    IO<?> failed = IO.<T>Fail(new RuntimeException("1"))
-        .recover(err -> Optional.of(v))
-        .chain(IO.Fail(new RuntimeException("2")));
-    thrown.expect(RuntimeException.class);
-    thrown.expectMessage("2");
-    failed.run();
-  }
-
-  @Property
-  public void failRecoverFail2() {
-    IO<?> failed = IO.Fail(new RuntimeException("1"))
-        .recoverWith(err -> Optional.of(IO.Fail(new RuntimeException("2"))));
-    thrown.expect(RuntimeException.class);
-    thrown.expectMessage("2");
-    failed.run();
-  }
-
-  @Property
-  public void fail2(@IOGen(pools = 20, shouldFail = true) IO<Object> io) {
+  public void fail(@IOGen(shouldFail = true) IO<?> io) {
     thrown.expect(RuntimeException.class);
     io.run();
   }
 
   @Property
-  public void recover2(@IOGen(pools = 20) IO<?> io) {
+  public void recover(@IOGen(canFail = false) IO<?> io) {
     io.run();
   }
 
   @Property
-  public <T, U> void map(T s, Function<T, U> fn) {
-    assertThat(IO.Pure(s).map(fn::apply).run(), equalTo(fn.apply(s)));
+  public <T, U> void map(IO<T> io, Fn<T, U> fn) {
+    resultsShouldBeEqual(
+        () -> io.map(fn).run(),
+        () -> fn.ap(io.run())
+    );
   }
 
   @Property
-  public <T, U> void map2(@IOGen(pools = 20) IO<T> io, Function<T, U> fn) {
-    assertThat(io.map(fn::apply).run(), equalTo(fn.apply(io.run())));
+  public <T, U> void monadLaw_LeftIdentity(T value, Fn<T, IO<U>> fn) {
+    checkSameIO(
+        IO.Pure(value).flatMap(fn),
+        fn.ap(value)
+    );
+  }
+
+  @Property
+  public <T> void monadLaw_RightIdentity(IO<T> value) {
+    checkSameIO(
+        value.flatMap(IO::Pure),
+        value
+    );
+  }
+
+  @Property
+  public <T, U, V> void monadLaw_Associativity(IO<T> io, Fn<T, IO<U>> f1, Fn<U, IO<V>> f2) {
+    checkSameIO(
+        io.flatMap(f1).flatMap(f2),
+        io.flatMap(t -> f1.ap(t).flatMap(f2))
+    );
+  }
+
+  @Property
+  public <T, U> void mapPureFlatMap(IO<T> io, Fn<T, U> fn) {
+    checkSameIO(
+        io.map(fn),
+        io.flatMap(fn.andThen(IO::Pure))
+    );
+  }
+
+  private static <T> void resultsShouldBeEqual(Supplier<T> s1, Supplier<T> s2) {
+
+    Exception err1 = null;
+    Exception err2 = null;
+
+    T res1 = null;
+    T res2 = null;
+    try {
+      res1 = s1.get();
+    } catch (Exception e) {
+      err1 = e;
+    }
+
+    try {
+      res2 = s2.get();
+    } catch (Exception e) {
+      err2 = e;
+    }
+
+    if (err1 != null || err2 != null) {
+      assertEquals(err1, err2);
+    } else {
+      assertEquals(res1, res2);
+    }
+  }
+
+  private static <T> void checkSameIO(IO<T> io1, IO<T> io2) {
+    resultsShouldBeEqual(io1::run, io2::run);
   }
 }

@@ -3,7 +3,6 @@ package com.github.lpld.jeff.generators;
 import com.github.lpld.jeff.IO;
 import com.pholser.junit.quickcheck.generator.ComponentizedGenerator;
 import com.pholser.junit.quickcheck.generator.GenerationStatus;
-import com.pholser.junit.quickcheck.generator.Generator;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import java.util.Optional;
@@ -16,14 +15,24 @@ import static com.github.lpld.jeff.IO.Pure;
  */
 public class IOGenerator extends ComponentizedGenerator<IO> {
 
-  private IOGen conf;
+  private int pools = 20;
+  private double failureProbability = 0.3;
+  private int depth = 100;
 
   public IOGenerator() {
     super(IO.class);
   }
 
   public void configure(IOGen conf) {
-    this.conf = conf;
+    this.pools = conf.pools();
+    this.depth = conf.depth();
+    if (conf.shouldFail()) {
+      failureProbability = 1.0;
+    } else if (conf.canFail()) {
+      failureProbability = 0.3;
+    } else {
+      failureProbability = 0.0;
+    }
   }
 
   public int numberOfNeededComponents() {
@@ -33,23 +42,27 @@ public class IOGenerator extends ComponentizedGenerator<IO> {
   @Override
   public IO generate(SourceOfRandomness random, GenerationStatus status) {
 
-    if (conf.pools() > 0) {
-      Resources.initExecutors(conf.pools());
+    if (pools > 0) {
+      Resources.initExecutors(pools);
     }
-    final IOGenHelper generator =
-        new IOGenHelper(componentGenerators().get(0), random, status, conf.pools());
-    final IO<Object> io1 = generator.randomIO(70, true, true);
 
-    if (conf.shouldFail()) {
+    final int depth1 = (int) Math.round(depth * .7);
+    final int depth2 = depth - depth1;
+    final IOGenHelper generator =
+        new IOGenHelper(gen(), componentGenerators().get(0), random, status, pools);
+    final IO<Object> io1 = generator.randomIO(depth1, true, true);
+
+    final boolean willFail = random.nextDouble() < failureProbability;
+
+    if (willFail) {
       return io1
-          .chain(IO.Fail(new RuntimeException()))
-          .chain(generator.randomIO(50, true, false));
+          .chain(IO.Fail(generator.randomError()))
+          .chain(generator.randomIO(depth2, true, false));
     } else {
       final Object r = generator.randomObject();
       return io1
           .recover(err -> Optional.of(Pure(r)))
-          .chain(generator.randomIO(50, false, true));
+          .chain(generator.randomIO(depth2, false, true));
     }
   }
-
 }

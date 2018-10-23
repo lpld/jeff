@@ -2,7 +2,9 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.data.Unit;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -10,6 +12,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
@@ -23,9 +26,77 @@ import static org.junit.Assert.assertThat;
 
 public class IOTest {
 
+  @Rule
+  public ExpectedException thrown = ExpectedException.none();
+
   @Test
-  public void testPure() {
-    
+  public void pure() {
+    final IO<String> pure = IO.Pure("123");
+    assertThat(pure.run(), equalTo("123"));
+    assertThat(pure.run(), equalTo("123"));
+  }
+
+  @Test
+  public void delayRepeat() {
+    final AtomicInteger i = new AtomicInteger();
+
+    final IO<String> io = IO.Delay(() -> {
+      i.incrementAndGet();
+      return "234";
+    });
+
+    assertThat(i.get(), is(0));
+    assertThat(io.run(), is("234"));
+    assertThat(i.get(), is(1));
+    assertThat(io.run(), is("234"));
+    assertThat(i.get(), is(2));
+  }
+
+  @Test
+  public void fail() {
+    final IO<?> fail = IO.Fail(new RuntimeException("error"));
+    thrown.expect(RuntimeException.class);
+    thrown.expectMessage("error");
+    fail.run();
+  }
+
+  @Test
+  public  void pureRecover() {
+
+    final String result = IO.Pure("777")
+        .recover(err -> Optional.of("666"))
+        .run();
+
+    assertThat(result, is("777"));
+  }
+
+  @Test
+  public void failRecover() {
+
+    final String result = IO.<String>Fail(new RuntimeException())
+        .recover(err -> Optional.of("333"))
+        .run();
+
+    assertThat(result, is("333"));
+  }
+
+  @Test
+  public void failRecoverFail() {
+    final IO<?> failed = IO.<String>Fail(new RuntimeException("error1"))
+        .recover(err -> Optional.of("OK"))
+        .chain(IO.Fail(new RuntimeException("error2")));
+    thrown.expect(RuntimeException.class);
+    thrown.expectMessage("error2");
+    failed.run();
+  }
+
+  @Test
+  public void failRecoverFail2() {
+    IO<?> failed = IO.Fail(new RuntimeException("error1"))
+        .recoverWith(err -> Optional.of(IO.Fail(new RuntimeException("error2"))));
+    thrown.expect(RuntimeException.class);
+    thrown.expectMessage("error2");
+    failed.run();
   }
 
   @Test
@@ -79,11 +150,11 @@ public class IOTest {
   }
 
   @Test
-  public void flatMapTest() {
+  public void stackSafety() {
 
     IO<Unit> io = IO.unit;
 
-    for (int i = 1; i < 10000; i++) {
+    for (int i = 1; i < 100000; i++) {
       int finalI = i;
       io = io
           .map(x -> finalI)
@@ -92,34 +163,4 @@ public class IOTest {
 
     io.run();
   }
-
-  @Test
-  public void shouldAnswerWithTrue() {
-
-    final IO<Integer> io = IO.Delay(() -> {
-      System.out.println();
-      return 5;
-    });
-
-    io.recover(rules(
-        on(IOException.class)
-            .doReturn(22),
-
-        on(IllegalStateException.class).and(is -> is.getMessage().contains("abc"))
-            .doReturn(() -> 77 + 12)
-    ));
-
-    io.recoverWith(rules(
-        on(IOException.class).doReturn(IO(() -> 44))
-    ));
-
-    io.recover((th) -> th instanceof IOException ? Optional.of(22) : Optional.empty());
-  }
-
-  @Test
-  public void testFork() {
-
-
-  }
-
 }

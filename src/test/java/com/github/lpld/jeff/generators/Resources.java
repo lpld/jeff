@@ -17,13 +17,12 @@ public class Resources {
   private static List<ExecutorService> executors = null;
 
   public static void initExecutors(int number) {
-    if (executors != null) {
-      throw new IllegalStateException();
+    if (executors == null) {
+      executors = IntStream
+          .range(0, number)
+          .mapToObj(i -> Executors.newSingleThreadExecutor())
+          .collect(Collectors.toList());
     }
-    executors = IntStream
-        .range(0, number)
-        .mapToObj(i -> Executors.newSingleThreadExecutor())
-        .collect(Collectors.toList());
   }
 
   public static void shutdownAll() {

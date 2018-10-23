@@ -3,6 +3,7 @@ package com.github.lpld.jeff.generators;
 import com.github.lpld.jeff.IO;
 import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.generator.Generator;
+import com.pholser.junit.quickcheck.generator.Generators;
 import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import java.util.Optional;
@@ -14,6 +15,7 @@ import java.util.Optional;
 @lombok.RequiredArgsConstructor
 public class IOGenHelper {
 
+  final Generators generators;
   final Generator<?> compGen;
   final SourceOfRandomness random;
   final GenerationStatus status;
@@ -32,51 +34,55 @@ public class IOGenHelper {
     switch (random.nextInt(7)) {
       case 0:
         final Object mappedValue = randomObject();
-        io = io.map(fn -> mappedValue);
-        break;
+        return io.map(fn -> mappedValue);
 
       case 1:
         if (canFail) {
-          io = io.chain(IO.Fail(new RuntimeException()));
+          return io.chain(IO.Fail(randomError()));
+        } else {
+          return io;
         }
-        break;
 
       case 2:
         if (canRecover) {
           final Object recValue = randomObject();
-          io = io.recover(err -> Optional.of(IO.Pure(recValue)));
+          return io.recover(err -> Optional.of(IO.Pure(recValue)));
         } else {
-          io = io.recoverWith(err -> Optional.of(IO.Fail(new RuntimeException())));
+          final TestException failWith = randomError();
+          return io.recoverWith(err -> Optional.of(IO.Fail(failWith)));
         }
-        break;
 
       case 3:
         final Object delayValue = randomObject();
-        io = io.chain(IO.Delay(() -> delayValue));
-        break;
+        return io.chain(IO.Delay(() -> delayValue));
 
       case 4:
         final IO<Object> finalIo = io;
-        io = IO.Suspend(() -> finalIo);
-        break;
+        return IO.Suspend(() -> finalIo);
 
       case 5:
         final IO<Object> nestedIO = randomIO(maxNestedSize, canFail, canRecover);
-        io = io.flatMap(any -> nestedIO);
-        break;
+        return io.flatMap(any -> nestedIO);
 
       case 6:
         if (executorsSize > 0) {
-          io = io
+          return io
               .chain(IO.Fork(Resources.executor(random.nextInt(executorsSize))))
               .chain(IO.Pure(randomObject()));
+        } else {
+          return io;
         }
-        break;
+      default:
+        throw new IllegalStateException();
     }
-    return io;
   }
 
   Object randomObject() {
     return compGen.generate(random, status);
+  }
+
+  TestException randomError() {
+    final String message = generators.type(String.class).generate(random, status);
+    return new TestException(message);
   }
 }
