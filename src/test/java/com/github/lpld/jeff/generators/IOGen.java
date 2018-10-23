@@ -20,8 +20,16 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 @GeneratorConfiguration
 public @interface IOGen {
 
-  int pools() default 20;
-  int depth() default 100;
-  boolean shouldFail() default false;
-  boolean canFail() default true;
+  int maxDepth() default Defaults.maxDepth;
+  boolean shouldFail() default Defaults.shouldFail;
+  boolean canFail() default Defaults.canFail;
+  boolean canFork() default Defaults.canFork;
+
+  final class Defaults {
+
+    static final int maxDepth = 100;
+    static final boolean shouldFail = false;
+    static final boolean canFail = true;
+    static final boolean canFork = true;
+  }
 }

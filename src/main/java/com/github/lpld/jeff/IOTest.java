@@ -64,51 +64,7 @@ public class IOTest {
     tp3.shutdown();
   }
 
-  public static void main0(String[] args) {
-
-    IO<Unit> printThreadName =
-        IO(() -> Thread.currentThread().getName()).flatMap(Console::printLine);
-
-    final ExecutorService tp1 = Executors.newSingleThreadExecutor();
-    final ExecutorService tp2 = Executors.newSingleThreadExecutor();
-    final ExecutorService tp3 = Executors.newSingleThreadExecutor();
-
-//    printThreadName
-//        .chain(Fork(tp))
-//        .chain(printThreadName)
-//        .run();
-
-    printThreadName
-        .flatMap(x -> printThreadName
-            .chain(Fork(tp1))
-            .chain(printThreadName)
-            .chain(Fork(tp2))
-            .chain(printThreadName)
-            .chain(Fork(tp3))
-        )
-        .chain(printThreadName)
-        .run();
-
-    tp1.shutdown();
-    tp2.shutdown();
-    tp3.shutdown();
-
-//    Console.readLine()
-//        .flatMap(l -> Fork(tp)
-//        .chain(Console.printLine(l))
-//    ).run();
-
-  }
-
   public static void main2(String[] args) {
-    //
-    Pure("a")
-        .map(Fn.id())
-        .chain(Fail(new IllegalArgumentException("3")))
-        .recover(rules(on(IllegalArgumentException.class).doReturn("-- No such file --")))
-        .map(Fn.id())
-        .run();
-
     Stream
         .eval(IO(() -> Files.newBufferedReader(Paths.get("/home/lpld/.vimrc"))))
         .flatMap(reader -> Stream.iterate(() -> Optional.ofNullable(reader.readLine())))

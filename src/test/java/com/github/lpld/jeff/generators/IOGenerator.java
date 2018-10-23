@@ -15,24 +15,20 @@ import static com.github.lpld.jeff.IO.Pure;
  */
 public class IOGenerator extends ComponentizedGenerator<IO> {
 
-  private int pools = 20;
-  private double failureProbability = 0.3;
-  private int depth = 100;
+  private int maxDepth = IOGen.Defaults.maxDepth;
+  private boolean shouldFail = IOGen.Defaults.shouldFail;
+  private boolean canFail = IOGen.Defaults.canFail;
+  private boolean canFork = IOGen.Defaults.canFork;
 
   public IOGenerator() {
     super(IO.class);
   }
 
   public void configure(IOGen conf) {
-    this.pools = conf.pools();
-    this.depth = conf.depth();
-    if (conf.shouldFail()) {
-      failureProbability = 1.0;
-    } else if (conf.canFail()) {
-      failureProbability = 0.3;
-    } else {
-      failureProbability = 0.0;
-    }
+    this.canFork = conf.canFork();
+    this.maxDepth = conf.maxDepth();
+    this.canFail = conf.canFail();
+    this.shouldFail = conf.shouldFail();
   }
 
   public int numberOfNeededComponents() {
@@ -41,15 +37,19 @@ public class IOGenerator extends ComponentizedGenerator<IO> {
 
   @Override
   public IO generate(SourceOfRandomness random, GenerationStatus status) {
-
-    if (pools > 0) {
-      Resources.initExecutors(pools);
+    final double failureProbability;
+    if (shouldFail) {
+      failureProbability = 1.0;
+    } else if (canFail) {
+      failureProbability = 0.25;
+    } else {
+      failureProbability = 0.0;
     }
 
-    final int depth1 = (int) Math.round(depth * .7);
-    final int depth2 = depth - depth1;
+    final int depth1 = (int) Math.round(maxDepth * .7);
+    final int depth2 = maxDepth - depth1;
     final IOGenHelper generator =
-        new IOGenHelper(gen(), componentGenerators().get(0), random, status, pools);
+        new IOGenHelper(gen(), componentGenerators().get(0), random, status, canFork);
     final IO<Object> io1 = generator.randomIO(depth1, true, true);
 
     final boolean willFail = random.nextDouble() < failureProbability;

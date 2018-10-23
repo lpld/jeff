@@ -12,14 +12,25 @@ import java.util.Optional;
  * @author leopold
  * @since 22/10/18
  */
-@lombok.RequiredArgsConstructor
-public class IOGenHelper {
+class IOGenHelper {
 
-  final Generators generators;
-  final Generator<?> compGen;
-  final SourceOfRandomness random;
-  final GenerationStatus status;
-  final int executorsSize;
+  private final Generators generators;
+  private final Generator<?> compGen;
+  private final SourceOfRandomness random;
+  private final GenerationStatus status;
+  private final boolean canFork;
+
+  IOGenHelper(Generators generators, Generator<?> compGen, SourceOfRandomness random,
+              GenerationStatus status, boolean canFork) {
+    if (canFork && Resources.size() <= 0) {
+      throw new IllegalStateException("Cannot perform fork: no executors initialized");
+    }
+    this.generators = generators;
+    this.compGen = compGen;
+    this.random = random;
+    this.status = status;
+    this.canFork = canFork;
+  }
 
   IO<Object> randomIO(int maxSize, boolean canFail, boolean canRecover) {
 
@@ -30,7 +41,8 @@ public class IOGenHelper {
     return io;
   }
 
-  IO<Object> chainRandom(IO<Object> io, boolean canFail, boolean canRecover, int maxNestedSize) {
+  private IO<Object> chainRandom(IO<Object> io, boolean canFail, boolean canRecover,
+                                 int maxNestedSize) {
     switch (random.nextInt(7)) {
       case 0:
         final Object mappedValue = randomObject();
@@ -65,9 +77,9 @@ public class IOGenHelper {
         return io.flatMap(any -> nestedIO);
 
       case 6:
-        if (executorsSize > 0) {
+        if (canFork) {
           return io
-              .chain(IO.Fork(Resources.executor(random.nextInt(executorsSize))))
+              .chain(IO.Fork(Resources.executor(random.nextInt(Resources.size()))))
               .chain(IO.Pure(randomObject()));
         } else {
           return io;

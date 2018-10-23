@@ -1,8 +1,6 @@
 package com.github.lpld.jeff.generators;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -16,13 +14,18 @@ public class Resources {
 
   private static List<ExecutorService> executors = null;
 
+  public static int size() {
+    return executors == null ? 0 : executors.size();
+  }
+
   public static void initExecutors(int number) {
-    if (executors == null) {
-      executors = IntStream
-          .range(0, number)
-          .mapToObj(i -> Executors.newSingleThreadExecutor())
-          .collect(Collectors.toList());
+    if (executors != null) {
+      throw new IllegalStateException();
     }
+    executors = IntStream
+        .range(0, number)
+        .mapToObj(i -> Executors.newSingleThreadExecutor())
+        .collect(Collectors.toList());
   }
 
   public static void shutdownAll() {

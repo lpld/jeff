@@ -6,7 +6,8 @@ import com.github.lpld.jeff.generators.Resources;
 import com.pholser.junit.quickcheck.Property;
 import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 
-import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
@@ -25,8 +26,13 @@ public class IOProperties {
   @Rule
   public ExpectedException thrown = ExpectedException.none();
 
-  @After
-  public void cleanUp() {
+  @BeforeClass
+  public static void init() {
+    Resources.initExecutors(20);
+  }
+
+  @AfterClass
+  public static void cleanUp() {
     Resources.shutdownAll();
   }
 
@@ -42,10 +48,15 @@ public class IOProperties {
   }
 
   @Property
-  public <T, U> void map(IO<T> io, Fn<T, U> fn) {
-    resultsShouldBeEqual(
-        () -> io.map(fn).run(),
-        () -> fn.ap(io.run())
+  public <T> void functorLaw_Identity(IO<T> io) {
+    checkSameIO(io.map(Fn.id()), io);
+  }
+
+  @Property
+  public <T, U, V> void functorLaw_Associativity(IO<T> io, Fn<T, U> f1, Fn<U, V> f2) {
+    checkSameIO(
+        io.map(f1).map(f2),
+        io.map(f1.andThen(f2))
     );
   }
 
@@ -70,6 +81,22 @@ public class IOProperties {
     checkSameIO(
         io.flatMap(f1).flatMap(f2),
         io.flatMap(t -> f1.ap(t).flatMap(f2))
+    );
+  }
+
+  @Property
+  public <T, U> void map(IO<T> io, Fn<T, U> fn) {
+    resultsShouldBeEqual(
+        () -> io.map(fn).run(),
+        () -> fn.ap(io.run())
+    );
+  }
+
+  @Property
+  public <T, U> void flatMap(IO<T> io, Fn<T, IO<U>> f) {
+    resultsShouldBeEqual(
+        () -> io.flatMap(f).run(),
+        () -> f.ap(io.run()).run()
     );
   }
 

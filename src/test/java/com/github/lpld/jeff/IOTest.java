@@ -1,18 +1,24 @@
 package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.data.Unit;
+import com.github.lpld.jeff.functions.Fn;
 
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
@@ -130,6 +136,40 @@ public class IOTest {
     } finally {
       ex.shutdown();
     }
+  }
+
+  @Test
+  public void testFork() {
+    final List<ExecutorService> executors = Arrays.asList(
+        Executors.newSingleThreadExecutor(),
+        Executors.newSingleThreadExecutor(),
+        Executors.newSingleThreadExecutor());
+
+    final List<String> exepectedNames = executors.stream()
+        .map(ex -> {
+          try {
+            return ex.submit(() -> Thread.currentThread().getName()).get();
+          } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException();
+          }
+        })
+        .collect(Collectors.toList());
+
+    final String mainThread = Thread.currentThread().getName();
+
+    Fn<String, IO<Unit>> verifyThreadName =
+        name -> IO.Delay(() -> assertThat(Thread.currentThread().getName(), equalTo(name)));
+
+    verifyThreadName.ap(mainThread)
+        .flatMap(x -> verifyThreadName.ap(mainThread)
+            .chain(IO.Fork(executors.get(0)))
+            .chain(verifyThreadName.ap(exepectedNames.get(0)))
+            .chain(IO.Fork(executors.get(1)))
+            .chain(verifyThreadName.ap(exepectedNames.get(1)))
+            .chain(IO.Fork(executors.get(2)))
+        )
+        .chain(verifyThreadName.ap(exepectedNames.get(2)))
+        .run();
   }
 
   @Test
