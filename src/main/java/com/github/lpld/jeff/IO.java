@@ -8,10 +8,13 @@ import com.github.lpld.jeff.functions.XRun;
 import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import lombok.AccessLevel;
@@ -62,13 +65,38 @@ public abstract class IO<T> {
   }
 
   public static IO<Unit> Fork(ExecutorService executor) {
-    return Async(onFinish -> executor.submit(() -> {
-      onFinish.run(Right(Unit.unit));
-    }));
+    return Async(onFinish -> executor.submit(() -> onFinish.run(Right(Unit.unit))));
   }
 
   public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
     return new Async<>(f);
+  }
+
+  public static <T> IO<T> never() {
+    return Async(cb -> {
+    });
+  }
+
+  // todo: support cancelation logic
+  public static <L, R> IO<Or<L, R>> race(ExecutorService executor, IO<L> left, IO<R> right) {
+
+    return Async(callback -> {
+      final AtomicBoolean done = new AtomicBoolean();
+      final BiConsumer<Or<L, R>, Throwable> onComplete = (res, err) -> {
+        if (done.compareAndSet(false, true)) {
+          if (err == null) {
+            callback.run(Right(res));
+          } else {
+            callback.run(Left(err));
+          }
+        }
+      };
+
+      Fork(executor).chain(left).runAsync()
+          .whenComplete((res, err) -> onComplete.accept(Left(res), err));
+      Fork(executor).chain(right).runAsync()
+          .whenComplete((res, err) -> onComplete.accept(Right(res), err));
+    });
   }
 
   public static IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
@@ -104,9 +132,13 @@ public abstract class IO<T> {
     return new Recover<>(this, r);
   }
 
+  public CompletableFuture<T> runAsync() {
+    return IORun.runAsync(this, new CallStack<>());
+  }
+
   public T run() {
     try {
-      return IORun.runAsync(this, new CallStack<>()).get();
+      return runAsync().get();
     } catch (InterruptedException err) {
       return WrappedError.throwWrapped(err);
     } catch (ExecutionException err) {
