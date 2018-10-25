@@ -3,7 +3,7 @@ package com.github.lpld.jeff.data;
 import java.util.NoSuchElementException;
 
 import lombok.AccessLevel;
-import lombok.Getter;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
@@ -47,14 +47,26 @@ public abstract class Or<L, R> {
   }
 }
 
+@EqualsAndHashCode(callSuper = false)
 @RequiredArgsConstructor
 class Left<L> extends Or<L, Object> {
 
   final L value;
+
+  @Override
+  public String toString() {
+    return "Left(" + value + ")";
+  }
 }
 
+@EqualsAndHashCode(callSuper = false)
 @RequiredArgsConstructor
 class Right<R> extends Or<Object, R> {
 
   final R value;
+
+  @Override
+  public String toString() {
+    return "Right(" + value + ")";
+  }
 }

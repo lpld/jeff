@@ -1,6 +1,7 @@
 package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.data.Or;
+import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Run1;
@@ -23,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.data.Or.Left;
 import static com.github.lpld.jeff.data.Or.Right;
+import static com.github.lpld.jeff.data.Pr.Pr;
 
 
 /**
@@ -77,17 +79,62 @@ public abstract class IO<T> {
     });
   }
 
-  // todo: support cancelation logic
+  // todo: support cancellation logic
   public static <L, R> IO<Or<L, R>> race(ExecutorService executor, IO<L> left, IO<R> right) {
 
     return Async(callback -> {
       final AtomicBoolean done = new AtomicBoolean();
       final BiConsumer<Or<L, R>, Throwable> onComplete = (res, err) -> {
         if (done.compareAndSet(false, true)) {
-          if (err == null) {
-            callback.run(Right(res));
-          } else {
+          callback.run(err == null ? Right(res) : Left(err));
+        }
+      };
+
+      Fork(executor).chain(left).runAsync()
+          .whenComplete((res, err) -> onComplete.accept(Left(res), err));
+      Fork(executor).chain(right).runAsync()
+          .whenComplete((res, err) -> onComplete.accept(Right(res), err));
+    });
+  }
+
+  /**
+   * Function that non-deterministically places two IO values in a sequence.
+   * Return value of this method is a product of either L and IO<R> or a product of R and IO<L>,
+   * depending on which of the two IO values computes first.
+   */
+  public static <L, R> IO<Or<Pr<L, IO<R>>, Pr<R, IO<L>>>>
+  seq(ExecutorService executor, IO<L> left, IO<R> right) {
+
+    return Async((Run1<Or<Throwable, Or<Pr<L, IO<R>>, Pr<R, IO<L>>>>> callback) -> {
+
+      final AtomicBoolean fstDone = new AtomicBoolean();
+      final CompletableFuture<Object> sndPromise = new CompletableFuture<>();
+
+      final BiConsumer<Or<L, R>, Throwable> onComplete = (res, err) -> {
+
+        if (fstDone.compareAndSet(false, true)) {
+
+          if (err != null) {
             callback.run(Left(err));
+          } else if (res.isLeft()) {
+
+            @SuppressWarnings("unchecked") final Or<Pr<L, IO<R>>, Pr<R, IO<L>>> leftDone =
+                Left(Pr(res.getLeft(), IO.fromFuture(((CompletableFuture<R>) sndPromise))));
+            callback.run(Right(leftDone));
+          } else {
+
+            @SuppressWarnings("unchecked") final Or<Pr<L, IO<R>>, Pr<R, IO<L>>> rightDone =
+                Right(Pr(res.getRight(), IO.fromFuture(((CompletableFuture<L>) sndPromise))));
+            callback.run(Right(rightDone));
+          }
+        } else {
+
+          if (err != null) {
+            sndPromise.completeExceptionally(err);
+          } else if (res.isLeft()) {
+            sndPromise.complete(res.getLeft());
+          } else {
+            sndPromise.complete(res.getRight());
           }
         }
       };
@@ -102,6 +149,11 @@ public abstract class IO<T> {
   public static IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
     return Async(onFinish -> scheduler
         .schedule(() -> onFinish.run(Right(Unit.unit)), millis, TimeUnit.MILLISECONDS));
+  }
+
+  public static <T> IO<T> fromFuture(CompletableFuture<T> future) {
+    return Async(onFinish -> future
+        .whenComplete((res, err) -> onFinish.run(err != null ? Left(err) : Right(res))));
   }
 
   public <U> IO<U> map(Fn<T, U> f) {

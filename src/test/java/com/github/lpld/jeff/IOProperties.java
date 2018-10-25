@@ -2,7 +2,6 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.generators.IOGen;
-import com.github.lpld.jeff.generators.Resources;
 import com.pholser.junit.quickcheck.Property;
 import com.pholser.junit.quickcheck.runner.JUnitQuickcheck;
 

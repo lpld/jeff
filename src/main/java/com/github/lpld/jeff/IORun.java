@@ -59,7 +59,7 @@ public final class IORun {
             io = bind2.source.flatMap(a -> bind2.f.ap(a).flatMap(bind.f));
           }
         } else {
-          stack.pull();
+          stack.pop();
         }
       } catch (Throwable err) {
         final Optional<IO<T>> result = stack.tryHandle(err);
@@ -114,7 +114,7 @@ class CallStack<T> {
     top.callCount++;
   }
 
-  void pull() {
+  void pop() {
     if (top.callCount > 0) {
       top.callCount--;
     } else {
@@ -147,7 +147,6 @@ class CallStack<T> {
     }
     return Optional.empty();
   }
-
 }
 
 @lombok.RequiredArgsConstructor

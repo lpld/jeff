@@ -1,6 +1,7 @@
 package com.github.lpld.jeff.generators;
 
 import com.github.lpld.jeff.IO;
+import com.github.lpld.jeff.Resources;
 import com.pholser.junit.quickcheck.generator.GenerationStatus;
 import com.pholser.junit.quickcheck.generator.Generator;
 import com.pholser.junit.quickcheck.generator.Generators;

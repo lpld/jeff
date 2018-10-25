@@ -1,5 +1,7 @@
 package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.data.Or;
+import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 
@@ -7,30 +9,22 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.Pure;
-import static com.github.lpld.jeff.Recovery.on;
-import static com.github.lpld.jeff.Recovery.rules;
 import static com.github.lpld.jeff.data.Or.Left;
 import static com.github.lpld.jeff.data.Or.Right;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
-public class IOTest {
+public class IOTest extends IOTestBase {
 
   @Rule
   public ExpectedException thrown = ExpectedException.none();
@@ -67,7 +61,7 @@ public class IOTest {
   }
 
   @Test
-  public  void pureRecover() {
+  public void pureRecover() {
 
     final String result = IO.Pure("777")
         .recover(err -> Optional.of("666"))
@@ -107,45 +101,37 @@ public class IOTest {
 
   @Test
   public void testAsync() {
-    final ExecutorService ex = Executors.newSingleThreadExecutor();
-    try {
-      final CompletableFuture<Integer> future =
-          CompletableFuture.supplyAsync(() -> {
-            try {
-              Thread.sleep(1000);
-            } catch (InterruptedException e) {
-              throw new IllegalArgumentException();
-            }
-            return 21;
-          });
-
-      final Integer res = IO.<Integer>Async(onFinish -> future.whenComplete(
-          (result, error) -> {
-            if (error == null) {
-              onFinish.run(Right(result));
-            } else {
-              onFinish.run(Left(error));
-            }
+    final CompletableFuture<Integer> future =
+        CompletableFuture.supplyAsync(() -> {
+          try {
+            Thread.sleep(1000);
+          } catch (InterruptedException e) {
+            throw new IllegalArgumentException();
           }
-      ))
-          .map(i -> i * 2)
-          .run();
+          return 21;
+        }, Resources.executor(0));
 
-      assertThat(res, equalTo(42));
+    final Integer res = IO.<Integer>Async(onFinish -> future.whenComplete(
+        (result, error) -> {
+          if (error == null) {
+            onFinish.run(Right(result));
+          } else {
+            onFinish.run(Left(error));
+          }
+        }
+    ))
+        .map(i -> i * 2)
+        .run();
 
-    } finally {
-      ex.shutdown();
-    }
+    assertThat(res, equalTo(42));
   }
 
   @Test
   public void testFork() {
-    final List<ExecutorService> executors = Arrays.asList(
-        Executors.newSingleThreadExecutor(),
-        Executors.newSingleThreadExecutor(),
-        Executors.newSingleThreadExecutor());
 
-    final List<String> exepectedNames = executors.stream()
+    final List<String> exepectedNames = Resources.getSinglePools()
+        .stream()
+        .limit(3)
         .map(ex -> {
           try {
             return ex.submit(() -> Thread.currentThread().getName()).get();
@@ -162,11 +148,11 @@ public class IOTest {
 
     verifyThreadName.ap(mainThread)
         .flatMap(x -> verifyThreadName.ap(mainThread)
-            .chain(IO.Fork(executors.get(0)))
+            .chain(IO.Fork(Resources.executor(0)))
             .chain(verifyThreadName.ap(exepectedNames.get(0)))
-            .chain(IO.Fork(executors.get(1)))
+            .chain(IO.Fork(Resources.executor(1)))
             .chain(verifyThreadName.ap(exepectedNames.get(1)))
-            .chain(IO.Fork(executors.get(2)))
+            .chain(IO.Fork(Resources.executor(2)))
         )
         .chain(verifyThreadName.ap(exepectedNames.get(2)))
         .run();
@@ -175,18 +161,49 @@ public class IOTest {
   @Test
   public void testSleep() {
 
-    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    try {
-      final long now = System.currentTimeMillis();
-      final Integer result = IO.sleep(scheduler, 1000)
-          .chain(Pure(44))
-          .run();
+    final long now = System.currentTimeMillis();
+    final Integer result = IO.sleep(Resources.getScheduler(), 1000)
+        .chain(Pure(44))
+        .run();
 
-      assertThat(System.currentTimeMillis() - now > 1000, is(true));
-      assertThat(result, is(44));
-    } finally {
-      scheduler.shutdown();
-    }
+    assertThat(System.currentTimeMillis() - now > 1000, is(true));
+    assertThat(result, is(44));
+  }
+
+  @Test
+  public void testRaceSleeping() {
+    final IO<Integer> first = IO.sleep(Resources.getScheduler(), 500).map(u -> 22);
+    final IO<String> second = IO.sleep(Resources.getScheduler(), 200).map(u -> "abc");
+
+    final Or<Integer, String> result = IO.race(Resources.getSinglePool(), first, second).run();
+
+    assertThat(result, equalTo(Right("abc")));
+  }
+
+  @Test
+  public void testRaceBlocking() {
+    final IO<Integer> first = IO.Delay(() -> Thread.sleep(500)).map(u -> 22);
+    final IO<String> second = IO.Delay(() -> Thread.sleep(200)).map(u -> "abc");
+
+    final Or<Integer, String> result = IO.race(Resources.getMultiPool(), first, second).run();
+
+    assertThat(result, equalTo(Right("abc")));
+  }
+
+  @Test
+  public void testSeq() {
+
+    final IO<Integer> first = IO.sleep(Resources.getScheduler(), 300).map(u -> 22);
+    final IO<String> second = IO.sleep(Resources.getScheduler(), 200).map(u -> "abc");
+
+    final Or<Pr<Integer, IO<String>>, Pr<String, IO<Integer>>> result =
+        IO.seq(Resources.getSinglePool(), first, second).run();
+
+    assertThat(result.isRight(), is(true));
+    final Pr<String, IO<Integer>> res = result.getRight();
+
+    assertThat(res._1, is("abc"));
+    assertThat(res._2.run(), is(22));
   }
 
   @Test
