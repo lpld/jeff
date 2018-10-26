@@ -1,28 +1,30 @@
-package com.github.lpld.jeff.data;
+package com.github.lpld.jeff;
 
+import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Xn0;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /**
  * @author leopold
  * @since 12/10/18
  */
-public final class Futures {
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+final class Futures {
 
-  public static <T> CompletableFuture<T> failed(Throwable err) {
+  static <T> CompletableFuture<T> failed(Throwable err) {
     final CompletableFuture<T> future = new CompletableFuture<>();
     future.completeExceptionally(err);
     return future;
   }
 
-  public static <T> CompletableFuture<T> run(Xn0<CompletableFuture<T>> run) {
-    try {
-      return run.ap();
-    } catch (Throwable err) {
-      return failed(err);
-    }
+  @SuppressWarnings("unchecked")
+  static <U> CompletableFuture<U> cast(CompletableFuture<?> sndPromise) {
+    return (CompletableFuture<U>) sndPromise;
   }
 
   public static <T> CompletableFuture<T> run(Xn0<T> run, Executor executor) {

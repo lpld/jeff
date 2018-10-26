@@ -11,11 +11,12 @@ import com.github.lpld.jeff.functions.Xn0;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import lombok.AccessLevel;
@@ -25,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import static com.github.lpld.jeff.data.Or.Left;
 import static com.github.lpld.jeff.data.Or.Right;
 import static com.github.lpld.jeff.data.Pr.Pr;
+import static com.github.lpld.jeff.functions.Fn.id;
 
 
 /**
@@ -66,8 +68,8 @@ public abstract class IO<T> {
     return new Fail<>(t);
   }
 
-  public static IO<Unit> Fork(ExecutorService executor) {
-    return Async(onFinish -> executor.submit(() -> onFinish.run(Right(Unit.unit))));
+  public static IO<Unit> Fork(Executor executor) {
+    return Async(onFinish -> executor.execute(() -> onFinish.run(Right(Unit.unit))));
   }
 
   public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
@@ -80,13 +82,13 @@ public abstract class IO<T> {
   }
 
   // todo: support cancellation logic
-  public static <L, R> IO<Or<L, R>> race(ExecutorService executor, IO<L> left, IO<R> right) {
+  public static <L, R> IO<Or<L, R>> race(Executor executor, IO<L> left, IO<R> right) {
 
     return Async(callback -> {
       final AtomicBoolean done = new AtomicBoolean();
       final BiConsumer<Or<L, R>, Throwable> onComplete = (res, err) -> {
         if (done.compareAndSet(false, true)) {
-          callback.run(err == null ? Right(res) : Left(err));
+          callback.run(Or.of(err, res));
         }
       };
 
@@ -102,48 +104,52 @@ public abstract class IO<T> {
    * Return value of this method is a product of either L and IO<R> or a product of R and IO<L>,
    * depending on which of the two IO values computes first.
    */
-  public static <L, R> IO<Or<Pr<L, IO<R>>, Pr<R, IO<L>>>>
-  seq(ExecutorService executor, IO<L> left, IO<R> right) {
+  public static <T, U> IO<Or<Pr<T, IO<U>>, Pr<U, IO<T>>>>
+  seq(Executor executor, IO<T> io1, IO<U> io2) {
 
-    return Async((Run1<Or<Throwable, Or<Pr<L, IO<R>>, Pr<R, IO<L>>>>> callback) -> {
+    return Async(callback -> {
 
       final AtomicBoolean fstDone = new AtomicBoolean();
       final CompletableFuture<Object> sndPromise = new CompletableFuture<>();
 
-      final BiConsumer<Or<L, R>, Throwable> onComplete = (res, err) -> {
+      final Consumer<Or<Throwable, Or<T, U>>> onComplete =
+          (Or<Throwable, Or<T, U>> res) -> {
 
-        if (fstDone.compareAndSet(false, true)) {
+            if (fstDone.getAndSet(true)) {
+              res.forEach(
+                  sndPromise::completeExceptionally,
+                  success -> sndPromise.complete(success.fold(l -> l, r -> r))
+              );
+            } else {
+              callback.run(res.transform(
+                  id(),
+                  success -> success.transform(
+                      l -> Pr(l, fromFuture(Futures.cast(sndPromise))),
+                      r -> Pr(r, fromFuture(Futures.cast(sndPromise)))
+                  )
+              ));
+            }
+          };
 
-          if (err != null) {
-            callback.run(Left(err));
-          } else if (res.isLeft()) {
-
-            @SuppressWarnings("unchecked") final Or<Pr<L, IO<R>>, Pr<R, IO<L>>> leftDone =
-                Left(Pr(res.getLeft(), IO.fromFuture(((CompletableFuture<R>) sndPromise))));
-            callback.run(Right(leftDone));
-          } else {
-
-            @SuppressWarnings("unchecked") final Or<Pr<L, IO<R>>, Pr<R, IO<L>>> rightDone =
-                Right(Pr(res.getRight(), IO.fromFuture(((CompletableFuture<L>) sndPromise))));
-            callback.run(Right(rightDone));
-          }
-        } else {
-
-          if (err != null) {
-            sndPromise.completeExceptionally(err);
-          } else if (res.isLeft()) {
-            sndPromise.complete(res.getLeft());
-          } else {
-            sndPromise.complete(res.getRight());
-          }
-        }
-      };
-
-      Fork(executor).chain(left).runAsync()
-          .whenComplete((res, err) -> onComplete.accept(Left(res), err));
-      Fork(executor).chain(right).runAsync()
-          .whenComplete((res, err) -> onComplete.accept(Right(res), err));
+      Fork(executor).chain(io1).runAsync()
+          .handle((res, err) -> Or.of(err, Or.<T, U>Left(res)))
+          .thenAccept(onComplete);
+      Fork(executor).chain(io2).runAsync()
+          .handle((res, err) -> Or.of(err, Or.<T, U>Right(res)))
+          .thenAccept(onComplete);
     });
+  }
+
+  public static <T> IO<Pr<T, IO<T>>> pair(Executor executor, IO<T> io1, IO<T> io2) {
+    return seq(executor, io1, io2).map(Or::flatten);
+  }
+
+  public static <T, U> IO<Pr<T, U>> both(Executor executor, IO<T> io1, IO<U> io2) {
+    return IO.seq(executor, io1, io2)
+        .flatMap(seq -> seq.fold(
+            l -> l._2.map(u -> Pr(l._1, u)),
+            r -> r._2.map(t -> Pr(t, r._1))
+        ));
   }
 
   public static IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
@@ -152,8 +158,7 @@ public abstract class IO<T> {
   }
 
   public static <T> IO<T> fromFuture(CompletableFuture<T> future) {
-    return Async(onFinish -> future
-        .whenComplete((res, err) -> onFinish.run(err != null ? Left(err) : Right(res))));
+    return Async(onFinish -> future.whenComplete((res, err) -> onFinish.run(Or.of(err, res))));
   }
 
   public <U> IO<U> map(Fn<T, U> f) {

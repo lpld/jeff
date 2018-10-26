@@ -112,13 +112,7 @@ public class IOTest extends IOTestBase {
         }, Resources.executor(0));
 
     final Integer res = IO.<Integer>Async(onFinish -> future.whenComplete(
-        (result, error) -> {
-          if (error == null) {
-            onFinish.run(Right(result));
-          } else {
-            onFinish.run(Left(error));
-          }
-        }
+        (result, err) -> onFinish.run(Or.of(err, result))
     ))
         .map(i -> i * 2)
         .run();

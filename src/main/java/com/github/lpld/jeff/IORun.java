@@ -2,11 +2,11 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
-import com.github.lpld.jeff.data.Futures;
 import com.github.lpld.jeff.functions.Fn;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 import static com.github.lpld.jeff.IO.Pure;
@@ -95,13 +95,10 @@ public final class IORun {
 
   private static <T> CompletableFuture<T> executeAsync(CompletableFuture<T> promise,
                                                        Async<T> async) {
-    async.cb.run(result -> {
-      if (result.isLeft()) {
-        promise.completeExceptionally(result.getLeft());
-      } else {
-        promise.complete(result.getRight());
-      }
-    });
+    async.cb.run(result -> result.forEach(
+        promise::completeExceptionally,
+        promise::complete
+    ));
     return promise;
   }
 }

@@ -379,9 +379,47 @@ public class StreamTest {
     Stream.awakeEvery(scheduler, 500)
         .take(10)
         .mapEval(i -> Console.printLine("123"))
-        .drain();
+        .drain()
+        .run();
   }
 
+  @Test
+  public void testMerge() {
+    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    final Stream<Unit> s1 = Stream
+        .awakeEvery(scheduler, 130)
+        .chain(Console.printLine("1"))
+        .take(10);
+
+    final Stream<Unit> s2 = Stream
+        .awakeEvery(scheduler, 260)
+        .chain(Console.printLine("2"))
+        .take(4);
+
+    Stream.merge(scheduler, s1, s2)
+        .drain()
+        .run();
+  }
+
+  @Test
+  public void testZip() {
+    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    final Stream<Unit> s1 = Stream
+        .awakeEvery(scheduler, 130)
+        .chain(Console.printLine("1"))
+        .take(10);
+
+    final Stream<Unit> s2 = Stream
+        .awakeEvery(scheduler, 260)
+        .chain(Console.printLine("2"))
+        .take(4);
+
+    Stream.zip(scheduler, s1, s2)
+        .drain()
+        .run();
+  }
 //  @Test
 //  public void testScanRight() {
 //    for (Stream<Integer> stream : streams) {

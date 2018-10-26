@@ -1,10 +1,10 @@
 package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LNil;
+import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
-import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Fn2;
 import com.github.lpld.jeff.functions.Xn;
 import com.github.lpld.jeff.functions.Xn0;
@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
@@ -211,6 +212,10 @@ public abstract class Stream<T> {
 
   public abstract <U> Stream<U> mapEval(Fn<T, IO<U>> f);
 
+  public <U> Stream<U> chain(IO<U> f) {
+    return mapEval(any -> f);
+  }
+
   public abstract Stream<T> filter(Fn<T, Boolean> p);
 
   public IO<Boolean> exists(Fn<T, Boolean> p) {
@@ -230,10 +235,84 @@ public abstract class Stream<T> {
   }
 
   /**
+   * Return head but don't evaluate it. This method can help determine if
+   * the stream actually has a head (is not empty) without really evaluating head's value:
+   * {@code
+   * final Stream<T> stream = ...
+   * final IO<Boolean> isNotEmpty = stream.lazyHead().map(Optional::isPresent)
+   * }.
+   *
+   * This method can be implemented in terms of {@code collectRight}:
+   * {@code
+   * collectRight(Pure(Optional.empty()), (head, ignore) -> Pure(Optional.of(head)));
+   * }
+   */
+  public abstract IO<Optional<IO<T>>> lazyHead();
+
+  public abstract IO<Optional<T>> headOption();
+
+  /**
    * Run all the effects in the stream!
    */
-  public void drain() {
-    foldLeft(Unit.unit, (u, any) -> u).run();
+  public IO<Unit> drain() {
+    return foldLeft(Unit.unit, (u, any) -> u);
+  }
+
+  public static <T, U, V> Stream<V> zipWith(Executor executor,
+                                            Stream<T> stream1, Stream<U> stream2,
+                                            Fn2<T, U, V> combine) {
+
+    return Defer(
+        IO.both(executor, stream1.lazyHead(), stream2.lazyHead())
+            .map(res -> res._1.isPresent() && res._2.isPresent()
+                        ? Defer(IO.both(executor, res._1.get(), res._2.get())
+                                    .map(pr -> Cons(combine.ap(pr._1, pr._2),
+                                                    Stream.zipWith(executor,
+                                                                   stream1.tail(), stream2.tail(),
+                                                                   combine))
+                                    ))
+                        : Nil()
+            )
+    );
+  }
+
+  public static <T, U> Stream<Pr<T, U>> zip(Executor executor,
+                                            Stream<T> stream1, Stream<U> stream2) {
+    return zipWith(executor, stream1, stream2, Pr::of);
+  }
+
+  public static <T> Stream<T> merge(Executor executor, Stream<T> stream1, Stream<T> stream2) {
+
+    if (stream1 instanceof Nil) {
+      return stream2;
+    }
+
+    if (stream2 instanceof Nil) {
+      return stream1;
+    }
+
+    return Defer(
+        IO.seq(executor, stream1.headOption(), stream2.headOption())
+            .map(res -> {
+
+              final Pr<Optional<T>, IO<Optional<T>>> hSeq = Or.flatten(res);
+              final Pr<Stream<T>, Stream<T>> sSeq =
+                  res.fold(l -> Pr(stream1, stream2), r -> Pr(stream2, stream1));
+
+              // joining 2nd head and 2nd tail.
+              // this is almost equivalent to sSeq._2, but the head is already being evaluated
+              // at the moment and we don't want to run its effect twice
+              final Stream<T> str2 =
+                  Defer(hSeq._2.map(
+                      h2Opt -> h2Opt.map(h2Val -> Cons(h2Val, sSeq._2.tail())).orElse(Nil())));
+
+              // if 1st head is Optional.empty, then we just return 2nd stream:
+              // if 1st head is not empty, we join it with the rest:
+              return hSeq._1
+                  .map(h1Val -> Cons(h1Val, merge(executor, sSeq._1.tail(), str2)))
+                  .orElse(str2);
+            })
+    );
   }
 
   IO<LList<T>> toLList() {
@@ -319,6 +398,16 @@ class Cons<T> extends Stream<T> {
   }
 
   @Override
+  public IO<Optional<IO<T>>> lazyHead() {
+    return Pure(Optional.of(head));
+  }
+
+  @Override
+  public IO<Optional<T>> headOption() {
+    return head.map(Optional::of);
+  }
+
+  @Override
   public String toString() {
     return "Cons(" + head + "," + tail + ")";
   }
@@ -387,6 +476,16 @@ class Defer<T> extends Stream<T> {
   @Override
   public Stream<T> filter(Fn<T, Boolean> p) {
     return Defer(evalStream.map(s -> s.filter(p)));
+  }
+
+  @Override
+  public IO<Optional<IO<T>>> lazyHead() {
+    return evalStream.flatMap(Stream::lazyHead);
+  }
+
+  @Override
+  public IO<Optional<T>> headOption() {
+    return evalStream.flatMap(Stream::headOption);
   }
 
   @Override
@@ -463,6 +562,16 @@ class Nil extends Stream<Object> {
   @Override
   public Stream<Object> filter(Fn<Object, Boolean> p) {
     return instance();
+  }
+
+  @Override
+  public IO<Optional<IO<Object>>> lazyHead() {
+    return Pure(Optional.empty());
+  }
+
+  @Override
+  public IO<Optional<Object>> headOption() {
+    return Pure(Optional.empty());
   }
 
   @Override
