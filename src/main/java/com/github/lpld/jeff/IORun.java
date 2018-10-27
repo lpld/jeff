@@ -6,7 +6,6 @@ import com.github.lpld.jeff.functions.Fn;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
 import java.util.function.Function;
 
 import static com.github.lpld.jeff.IO.Pure;
@@ -17,18 +16,19 @@ import static com.github.lpld.jeff.IO.Pure;
  */
 public final class IORun {
 
-  static <T, U, V> CompletableFuture<T> runAsync(IO<T> io, CallStack<T> stack) {
+  static <T, U, V> CompletableFuture<T> runAsync(IO<T> io, CallStack<T> stack,
+                                                 CompletableFuture<T> resultPromise) {
 
     while (true) {
       try {
         io = unwrap(io, stack, Fn.id());
 
         if (io instanceof Pure) {
-          return CompletableFuture.completedFuture(((Pure<T>) io).pure);
+          return Futures.completed(resultPromise, ((Pure<T>) io).pure);
         }
 
         if (io instanceof Async) {
-          return executeAsync(new CompletableFuture<>(), ((Async<T>) io));
+          return executeAsync(resultPromise, (Async<T>) io);
         }
 
         if (io instanceof Bind) {
@@ -37,19 +37,20 @@ public final class IORun {
           final IO<U> source = unwrap(bind.source, stack, u -> u.flatMap(bind.f));
 
           if (source instanceof Async) {
-            CompletableFuture<U> promise = new CompletableFuture<>();
+            final CompletableFuture<U> promise = new CompletableFuture<>();
+            final Fn<U, IO<T>> f = bind.f;
 
-            // we want to register `thenCompose` callback before the async callback is called,
+            // we want to register `thenAccept` callback before the async callback is called,
             // because we want to remain in async callback's thread. If we don't do this and if
-            // async callback is very short, we might call `thenCompose` on a future that is already
-            // completed, and `thenCompose` will be executed in current thread, which is not a
+            // async callback is very short, we might call `thenAccept` on a future that is already
+            // completed, and `thenAccept` will be executed in current thread, which is not a
             // desirable behavior.
-            final CompletableFuture<T> result =
-                promise.thenCompose(io1 -> runAsync(bind.f.ap(io1), stack));
 
-            executeAsync(promise, ((Async<U>) source));
+            promise.thenAccept(u -> runAsync(f.ap(u), stack, resultPromise));
 
-            return result;
+            executeAsync(promise, (Async<U>) source);
+
+            return resultPromise;
           }
 
           if (source instanceof Pure) {

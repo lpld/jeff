@@ -14,12 +14,14 @@ public class InfiniteTest {
   public static void main(String[] args) {
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    final Stream<Unit> printMem = Stream.awakeEvery(scheduler, 1000)
+    final Stream<Unit> printMem = Stream.awakeEvery(scheduler, 1)
         .chain(IO.Delay(() -> Runtime.getRuntime().freeMemory()))
         .mapEval(Console::printLine);
 
-    final Stream<Unit> repeat = Stream.of(Unit.unit).repeat();
+//    Stream.eval(IO.Delay(() -> 1)).repeat().drain().run();
 
+//    final Stream<Unit> repeat = Stream.of(Unit.unit).repeat();
+//
     Stream
         .zip(scheduler, Stream.of(1).repeat(), Stream.of(2).repeat())
         .map(any -> Unit.unit)

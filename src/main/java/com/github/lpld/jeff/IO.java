@@ -190,7 +190,7 @@ public abstract class IO<T> {
   }
 
   public CompletableFuture<T> runAsync() {
-    return IORun.runAsync(this, new CallStack<>());
+    return IORun.runAsync(this, new CallStack<>(), new CompletableFuture<>());
   }
 
   public T run() {
