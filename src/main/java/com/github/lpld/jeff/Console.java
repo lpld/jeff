@@ -16,6 +16,10 @@ import static java.lang.System.out;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class Console {
 
+  public static IO<Unit> printLine(long longVal) {
+    return printLine(Long.toString(longVal));
+  }
+
   public static IO<Unit> printLine(String str) {
     return IO(() -> out.println(str));
   }

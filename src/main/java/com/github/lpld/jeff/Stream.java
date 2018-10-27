@@ -1,7 +1,6 @@
 package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LNil;
-import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
@@ -30,6 +29,7 @@ import static com.github.lpld.jeff.data.Pr.Pr;
  * @author leopold
  * @since 10/10/18
  */
+@NoArgsConstructor(access = AccessLevel.PACKAGE)
 public abstract class Stream<T> {
 
   /**
@@ -212,6 +212,16 @@ public abstract class Stream<T> {
 
   public abstract <U> Stream<U> mapEval(Fn<T, IO<U>> f);
 
+  abstract IO<Optional<Cons<T>>> extract();
+
+  public IO<Optional<Pr<T, Stream<T>>>> split() {
+    return extract()
+        .flatMap(opt -> opt
+            .map(cons -> cons.head.map(h -> Optional.of(Pr(h, cons.tail))))
+            .orElseGet(() -> Pure(Optional.empty()))
+        );
+  }
+
   public <U> Stream<U> chain(IO<U> f) {
     return mapEval(any -> f);
   }
@@ -263,22 +273,22 @@ public abstract class Stream<T> {
                                             Fn2<T, U, V> combine) {
 
     return Defer(
-        IO.both(executor, stream1.lazyHead(), stream2.lazyHead())
-            .map(res -> res._1.isPresent() && res._2.isPresent()
-                        ? Defer(IO.both(executor, res._1.get(), res._2.get())
-                                    .map(pr -> Cons(combine.ap(pr._1, pr._2),
-                                                    Stream.zipWith(executor,
-                                                                   stream1.tail(), stream2.tail(),
-                                                                   combine))
-                                    ))
-                        : Nil()
-            )
-    );
+        IO.both(executor, stream1.extract(), stream2.extract())
+            .map(res -> res._1.isPresent() && res._2.isPresent() ? Defer(
+                IO.both(executor, res._1.get().head, res._2.get().head)
+                    .map(pr -> Cons(combine.ap(pr._1, pr._2),
+                                    Stream.zipWith(executor, res._1.get().tail, res._2.get().tail,
+                                                   combine)))
+            ) : Nil()));
   }
 
   public static <T, U> Stream<Pr<T, U>> zip(Executor executor,
                                             Stream<T> stream1, Stream<U> stream2) {
     return zipWith(executor, stream1, stream2, Pr::of);
+  }
+
+  public Stream<T> merge(Executor executor, Stream<T> other) {
+    return merge(executor, this, other);
   }
 
   public static <T> Stream<T> merge(Executor executor, Stream<T> stream1, Stream<T> stream2) {
@@ -292,24 +302,13 @@ public abstract class Stream<T> {
     }
 
     return Defer(
-        IO.seq(executor, stream1.headOption(), stream2.headOption())
-            .map(res -> {
-
-              final Pr<Optional<T>, IO<Optional<T>>> hSeq = Or.flatten(res);
-              final Pr<Stream<T>, Stream<T>> sSeq =
-                  res.fold(l -> Pr(stream1, stream2), r -> Pr(stream2, stream1));
-
-              // joining 2nd head and 2nd tail.
-              // this is almost equivalent to sSeq._2, but the head is already being evaluated
-              // at the moment and we don't want to run its effect twice
+        IO.pair(executor, stream1.split(), stream2.split())
+            .map(seq -> {
               final Stream<T> str2 =
-                  Defer(hSeq._2.map(
-                      h2Opt -> h2Opt.map(h2Val -> Cons(h2Val, sSeq._2.tail())).orElse(Nil())));
+                  Defer(seq._2.map(opt -> opt.map(ht -> Cons(ht._1, ht._2)).orElse(Nil())));
 
-              // if 1st head is Optional.empty, then we just return 2nd stream:
-              // if 1st head is not empty, we join it with the rest:
-              return hSeq._1
-                  .map(h1Val -> Cons(h1Val, merge(executor, sSeq._1.tail(), str2)))
+              return seq._1
+                  .map(ht -> Cons(ht._1, merge(executor, ht._2, str2)))
                   .orElse(str2);
             })
     );
@@ -408,6 +407,12 @@ class Cons<T> extends Stream<T> {
   }
 
   @Override
+  IO<Optional<Cons<T>>> extract() {
+    return Pure(Optional.of(this));
+  }
+
+
+  @Override
   public String toString() {
     return "Cons(" + head + "," + tail + ")";
   }
@@ -486,6 +491,11 @@ class Defer<T> extends Stream<T> {
   @Override
   public IO<Optional<T>> headOption() {
     return evalStream.flatMap(Stream::headOption);
+  }
+
+  @Override
+  IO<Optional<Cons<T>>> extract() {
+    return evalStream.flatMap(Stream::extract);
   }
 
   @Override
@@ -571,6 +581,11 @@ class Nil extends Stream<Object> {
 
   @Override
   public IO<Optional<Object>> headOption() {
+    return Pure(Optional.empty());
+  }
+
+  @Override
+  IO<Optional<Cons<Object>>> extract() {
     return Pure(Optional.empty());
   }
 
