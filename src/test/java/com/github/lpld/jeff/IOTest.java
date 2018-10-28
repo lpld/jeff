@@ -202,7 +202,7 @@ public class IOTest extends IOTestBase {
   }
 
   @Test
-  public void cancellationLogic() {
+  public void cancelSleep() {
     final AtomicInteger state = new AtomicInteger();
 
     final IO<Integer> io1 =
@@ -215,7 +215,7 @@ public class IOTest extends IOTestBase {
 
     final Or<Integer, Integer> result = IO
         .race(Resources.getSinglePool(), io1, io2)
-        .then(IO.sleep(Resources.getScheduler(), 1000))
+        .then(IO.sleep(Resources.getScheduler(), 400))
         .run();
 
     assertThat(result, is(Left(2)));

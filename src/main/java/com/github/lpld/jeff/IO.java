@@ -95,8 +95,8 @@ public abstract class IO<T> {
       final AtomicBoolean done = new AtomicBoolean();
       final Run3<Or<L, R>, Throwable, CancellableIO> onComplete = (res, err, other) -> {
         if (done.compareAndSet(false, true)) {
-          callback.run(Or.of(err, res));
           other.cancel();
+          callback.run(Or.of(err, res));
         }
       };
 
