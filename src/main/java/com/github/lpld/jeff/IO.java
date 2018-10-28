@@ -5,6 +5,7 @@ import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 import com.github.lpld.jeff.functions.Run1;
+import com.github.lpld.jeff.functions.Run3;
 import com.github.lpld.jeff.functions.XRun;
 import com.github.lpld.jeff.functions.Xn0;
 
@@ -13,9 +14,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -73,6 +74,13 @@ public abstract class IO<T> {
   }
 
   public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
+    return new Async<>(cb -> {
+      f.run(cb);
+      return IO.unit;
+    });
+  }
+
+  public static <T> IO<T> cancellable(Fn<Run1<Or<Throwable, T>>, IO<Unit>> f) {
     return new Async<>(f);
   }
 
@@ -81,21 +89,30 @@ public abstract class IO<T> {
     });
   }
 
-  // todo: support cancellation logic
   public static <L, R> IO<Or<L, R>> race(Executor executor, IO<L> left, IO<R> right) {
 
-    return Async(callback -> {
+    return IO.cancellable(callback -> {
       final AtomicBoolean done = new AtomicBoolean();
-      final BiConsumer<Or<L, R>, Throwable> onComplete = (res, err) -> {
+      final Run3<Or<L, R>, Throwable, CancellableIO> onComplete = (res, err, other) -> {
         if (done.compareAndSet(false, true)) {
           callback.run(Or.of(err, res));
+          other.cancel();
         }
       };
 
-      Fork(executor).chain(left).runAsync()
-          .whenComplete((res, err) -> onComplete.accept(Left(res), err));
-      Fork(executor).chain(right).runAsync()
-          .whenComplete((res, err) -> onComplete.accept(Right(res), err));
+      final CancellableIO leftTask = CancellableIO.create();
+      final CancellableIO rightTask = CancellableIO.create();
+
+      IORun.runAsync(Fork(executor).chain(left), leftTask)
+          .whenComplete((res, err) -> onComplete.run(Left(res), err, rightTask));
+
+      IORun.runAsync(Fork(executor).chain(right), rightTask)
+          .whenComplete((res, err) -> onComplete.run(Right(res), err, leftTask));
+
+      return IO.Delay(() -> {
+        leftTask.cancel();
+        rightTask.cancel();
+      });
     });
   }
 
@@ -153,8 +170,12 @@ public abstract class IO<T> {
   }
 
   public static IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
-    return Async(onFinish -> scheduler
-        .schedule(() -> onFinish.run(Right(Unit.unit)), millis, TimeUnit.MILLISECONDS));
+    return IO.cancellable(onFinish -> {
+      final ScheduledFuture<?> task = scheduler
+          .schedule(() -> onFinish.run(Right(Unit.unit)), millis, TimeUnit.MILLISECONDS);
+
+      return IO.Delay(() -> task.cancel(false)).toUnit();
+    });
   }
 
   public static <T> IO<T> fromFuture(CompletableFuture<T> future) {
@@ -177,6 +198,10 @@ public abstract class IO<T> {
     return flatMap(t -> io);
   }
 
+  public IO<T> then(IO<?> io) {
+    return flatMap(t -> io.map(any -> t));
+  }
+
   public IO<Or<Throwable, T>> attempt() {
     return map(Or::<Throwable, T>Right).recover(t -> Optional.of(Left(t)));
   }
@@ -190,7 +215,7 @@ public abstract class IO<T> {
   }
 
   public CompletableFuture<T> runAsync() {
-    return IORun.runAsync(this, new CallStack<>(), new CompletableFuture<>());
+    return IORun.runAsync(this, UncancellableIOTask.INSTANCE);
   }
 
   public T run() {
@@ -273,7 +298,7 @@ class Bind<T, U> extends IO<U> {
 class Async<T> extends IO<T> {
 
   // (Or<Throwable, T> => Unit) => Unit
-  final Run1<Run1<Or<Throwable, T>>> cb;
+  final Fn<Run1<Or<Throwable, T>>, IO<Unit>> cb;
 
   @Override
   public String toString() {

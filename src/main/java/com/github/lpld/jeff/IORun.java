@@ -2,11 +2,16 @@ package com.github.lpld.jeff;
 
 import com.github.lpld.jeff.LList.LCons;
 import com.github.lpld.jeff.LList.LNil;
+import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
+
+import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.IO.Pure;
 
@@ -16,8 +21,13 @@ import static com.github.lpld.jeff.IO.Pure;
  */
 public final class IORun {
 
-  static <T, U, V> CompletableFuture<T> runAsync(IO<T> io, CallStack<T> stack,
-                                                 CompletableFuture<T> resultPromise) {
+  static <T> CompletableFuture<T> runAsync(IO<T> io, RunningIO runningIO) {
+    return doRun(io, new CallStack<>(), runningIO, new CompletableFuture<>());
+  }
+
+  private static <T, U, V> CompletableFuture<T> doRun(IO<T> io, CallStack<T> stack,
+                                                      RunningIO runningIO,
+                                                      CompletableFuture<T> resultPromise) {
 
     while (true) {
       try {
@@ -28,11 +38,11 @@ public final class IORun {
         }
 
         if (io instanceof Async) {
-          return executeAsync(resultPromise, (Async<T>) io);
+          return executeAsync(resultPromise, runningIO, (Async<T>) io);
         }
 
         if (io instanceof Bind) {
-          stack.push();
+          stack.stackPush();
           final Bind<U, T> bind = (Bind<U, T>) io;
           final IO<U> source = unwrap(bind.source, stack, u -> u.flatMap(bind.f));
 
@@ -46,9 +56,9 @@ public final class IORun {
             // completed, and `thenAccept` will be executed in current thread, which is not a
             // desirable behavior.
 
-            promise.thenAccept(u -> runAsync(f.ap(u), stack, resultPromise));
+            promise.thenAccept(u -> doRun(f.ap(u), stack, runningIO, resultPromise));
 
-            executeAsync(promise, (Async<U>) source);
+            executeAsync(promise, runningIO, (Async<U>) source);
 
             return resultPromise;
           }
@@ -60,7 +70,7 @@ public final class IORun {
             io = bind2.source.flatMap(a -> bind2.f.ap(a).flatMap(bind.f));
           }
         } else {
-          stack.pop();
+          stack.stackPop();
         }
       } catch (Throwable err) {
         final Optional<IO<T>> result = stack.tryHandle(err);
@@ -82,7 +92,7 @@ public final class IORun {
         throw ((Fail<T>) io).err;
       } else if (io instanceof Recover) {
         IO<T> finalIo = io;
-        stack.addRule(err -> ((Recover<T>) finalIo).recover.apply(err).map(f::ap));
+        stack.addRecoveryRule(err -> ((Recover<T>) finalIo).recover.apply(err).map(f::ap));
         io = ((Recover<T>) io).io;
       } else if (io instanceof Suspend) {
         io = ((Suspend<T>) io).resume.ap();
@@ -95,12 +105,133 @@ public final class IORun {
   }
 
   private static <T> CompletableFuture<T> executeAsync(CompletableFuture<T> promise,
+                                                       RunningIO runningIO,
                                                        Async<T> async) {
-    async.cb.run(result -> result.forEach(
+
+    if (runningIO.isCancellable()) {
+      final RunState state = runningIO.updateAndGetState(st -> new RunState(st.isCancelled,
+                                                                            st.cancellingNow,
+                                                                            true));
+
+      if (state.isCancelled || state.cancellingNow) {
+        return Futures.cancelled(promise);
+      }
+    }
+
+    runningIO.setCancelLogic(async.cb.ap(result -> result.forEach(
         promise::completeExceptionally,
         promise::complete
-    ));
+    )));
+
+    promise.thenRun(() -> runningIO.setCancelLogic(IO.unit));
+
+    if (runningIO.isCancellable()) {
+      // todo: rethink this logic. Can we miss a cancellation request?
+      final RunState newState =
+          runningIO.updateAndGetState(st -> new RunState(st.isCancelled, st.cancellingNow, false));
+
+      if (newState.cancellingNow) {
+        runningIO.cancelNow();
+      }
+    }
+
     return promise;
+  }
+}
+
+@RequiredArgsConstructor
+class RunState {
+
+  public static final RunState INITIAL = new RunState(false, false, false);
+
+  final boolean isCancelled;
+  final boolean cancellingNow;
+  final boolean startingNow;
+}
+
+interface CancellableIO extends RunningIO {
+
+  void cancel();
+
+  static CancellableIO create() {
+    return new CancellableIOTask();
+  }
+}
+
+interface RunningIO {
+
+  boolean isCancellable();
+
+  RunState updateAndGetState(UnaryOperator<RunState> u);
+
+  void setCancelLogic(IO<Unit> cancelLogic);
+
+  void cancelNow();
+}
+
+class UncancellableIOTask implements RunningIO {
+
+  public static final UncancellableIOTask INSTANCE = new UncancellableIOTask();
+
+  @Override
+  public boolean isCancellable() {
+    return false;
+  }
+
+  @Override
+  public RunState updateAndGetState(UnaryOperator<RunState> u) {
+    return RunState.INITIAL;
+  }
+
+  @Override
+  public void setCancelLogic(IO<Unit> cancelLogic) {
+
+  }
+
+  @Override
+  public void cancelNow() {
+
+  }
+}
+
+class CancellableIOTask implements RunningIO, CancellableIO {
+
+  private final AtomicReference<RunState> state = new AtomicReference<>(RunState.INITIAL);
+  private IO<Unit> cancelAction = IO.unit;
+
+  @Override
+  public boolean isCancellable() {
+    return true;
+  }
+
+  @Override
+  public RunState updateAndGetState(UnaryOperator<RunState> u) {
+    return state.updateAndGet(u);
+  }
+
+  @Override
+  public void setCancelLogic(IO<Unit> cancelLogic) {
+    this.cancelAction = cancelLogic;
+  }
+
+  @Override
+  public void cancelNow() {
+    // todo: if an error happens here, we will ignore it, but is it OK?
+    this.cancelAction.runAsync();
+  }
+
+  @Override
+  public void cancel() {
+    final RunState prevState =
+        this.state.getAndUpdate(st -> new RunState(st.isCancelled, true, st.startingNow));
+
+    if (prevState.isCancelled || prevState.startingNow || prevState.cancellingNow) {
+      return;
+    }
+
+    cancelNow();
+
+    state.set(new RunState(true, false, false));
   }
 }
 
@@ -108,11 +239,11 @@ class CallStack<T> {
 
   private CallItem<T> top = new CallItem<>(null);
 
-  void push() {
+  void stackPush() {
     top.callCount++;
   }
 
-  void pop() {
+  void stackPop() {
     if (top.callCount > 0) {
       top.callCount--;
     } else {
@@ -120,7 +251,7 @@ class CallStack<T> {
     }
   }
 
-  void addRule(Function<Throwable, Optional<IO<T>>> rule) {
+  void addRecoveryRule(Function<Throwable, Optional<IO<T>>> rule) {
     if (top.callCount > 0) {
       top.callCount--;
       top = new CallItem<>(top);

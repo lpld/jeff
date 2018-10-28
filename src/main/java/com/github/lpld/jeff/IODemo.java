@@ -25,7 +25,7 @@ import static com.github.lpld.jeff.data.Unit.unit;
  * @author leopold
  * @since 11/10/18
  */
-public class IOTest {
+public class IODemo {
 
   public static void main(String[] args) {
     IO.<Integer>Fail(new IllegalArgumentException("1"))

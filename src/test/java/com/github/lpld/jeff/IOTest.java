@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -198,6 +199,27 @@ public class IOTest extends IOTestBase {
 
     assertThat(res._1, is("abc"));
     assertThat(res._2.run(), is(22));
+  }
+
+  @Test
+  public void cancellationLogic() {
+    final AtomicInteger state = new AtomicInteger();
+
+    final IO<Integer> io1 =
+        IO.sleep(Resources.getScheduler(), 300)
+            .chain(IO.Delay(() -> state.updateAndGet(i -> i + 2)));
+
+    final IO<Integer> io2 =
+        IO.sleep(Resources.getScheduler(), 600)
+            .chain(IO.Delay(() -> state.updateAndGet(i -> i + 1)));
+
+    final Or<Integer, Integer> result = IO
+        .race(Resources.getSinglePool(), io1, io2)
+        .then(IO.sleep(Resources.getScheduler(), 1000))
+        .run();
+
+    assertThat(result, is(Left(2)));
+    assertThat(state.get(), is(2));
   }
 
   @Test

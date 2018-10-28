@@ -27,6 +27,11 @@ final class Futures {
     return promise;
   }
 
+  static <T> CompletableFuture<T> cancelled(CompletableFuture<T> promise) {
+    promise.cancel(false);
+    return promise;
+  }
+
   @SuppressWarnings("unchecked")
   static <U> CompletableFuture<U> cast(CompletableFuture<?> sndPromise) {
     return (CompletableFuture<U>) sndPromise;
