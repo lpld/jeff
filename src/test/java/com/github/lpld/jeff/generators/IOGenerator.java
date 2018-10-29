@@ -7,8 +7,6 @@ import com.pholser.junit.quickcheck.random.SourceOfRandomness;
 
 import java.util.Optional;
 
-import static com.github.lpld.jeff.IO.Pure;
-
 /**
  * @author leopold
  * @since 23/10/18
@@ -56,12 +54,12 @@ public class IOGenerator extends ComponentizedGenerator<IO> {
 
     if (willFail) {
       return io1
-          .chain(IO.Fail(generator.randomError()))
+          .chain(IO.fail(generator.randomError()))
           .chain(generator.randomIO(depth2, true, false));
     } else {
       final Object r = generator.randomObject();
       return io1
-          .recover(err -> Optional.of(Pure(r)))
+          .recover(err -> Optional.of(IO.pure(r)))
           .chain(generator.randomIO(depth2, false, true));
     }
   }

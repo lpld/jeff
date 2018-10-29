@@ -13,12 +13,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static com.github.lpld.jeff.IO.IO;
-import static com.github.lpld.jeff.IO.Pure;
 import static com.github.lpld.jeff.data.Or.Left;
 import static com.github.lpld.jeff.data.Or.Right;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -32,7 +30,7 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void pure() {
-    final IO<String> pure = IO.Pure("123");
+    final IO<String> pure = IO.pure("123");
     assertThat(pure.run(), equalTo("123"));
     assertThat(pure.run(), equalTo("123"));
   }
@@ -41,7 +39,7 @@ public class IOTest extends IOTestBase {
   public void delayRepeat() {
     final AtomicInteger i = new AtomicInteger();
 
-    final IO<String> io = IO.Delay(() -> {
+    final IO<String> io = IO.delay(() -> {
       i.incrementAndGet();
       return "234";
     });
@@ -55,7 +53,7 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void fail() {
-    final IO<?> fail = IO.Fail(new RuntimeException("error"));
+    final IO<?> fail = IO.fail(new RuntimeException("error"));
     thrown.expect(RuntimeException.class);
     thrown.expectMessage("error");
     fail.run();
@@ -64,7 +62,7 @@ public class IOTest extends IOTestBase {
   @Test
   public void pureRecover() {
 
-    final String result = IO.Pure("777")
+    final String result = IO.pure("777")
         .recover(err -> Optional.of("666"))
         .run();
 
@@ -74,7 +72,7 @@ public class IOTest extends IOTestBase {
   @Test
   public void failRecover() {
 
-    final String result = IO.<String>Fail(new RuntimeException())
+    final String result = IO.<String>fail(new RuntimeException())
         .recover(err -> Optional.of("333"))
         .run();
 
@@ -83,9 +81,9 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void failRecoverFail() {
-    final IO<?> failed = IO.<String>Fail(new RuntimeException("error1"))
+    final IO<?> failed = IO.<String>fail(new RuntimeException("error1"))
         .recover(err -> Optional.of("OK"))
-        .chain(IO.Fail(new RuntimeException("error2")));
+        .chain(IO.fail(new RuntimeException("error2")));
     thrown.expect(RuntimeException.class);
     thrown.expectMessage("error2");
     failed.run();
@@ -93,8 +91,8 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void failRecoverFail2() {
-    IO<?> failed = IO.Fail(new RuntimeException("error1"))
-        .recoverWith(err -> Optional.of(IO.Fail(new RuntimeException("error2"))));
+    IO<?> failed = IO.fail(new RuntimeException("error1"))
+        .recoverWith(err -> Optional.of(IO.fail(new RuntimeException("error2"))));
     thrown.expect(RuntimeException.class);
     thrown.expectMessage("error2");
     failed.run();
@@ -112,7 +110,7 @@ public class IOTest extends IOTestBase {
           return 21;
         }, Resources.executor(0));
 
-    final Integer res = IO.<Integer>Async(onFinish -> future.whenComplete(
+    final Integer res = IO.<Integer>async(onFinish -> future.whenComplete(
         (result, err) -> onFinish.run(Or.of(err, result))
     ))
         .map(i -> i * 2)
@@ -139,15 +137,15 @@ public class IOTest extends IOTestBase {
     final String mainThread = Thread.currentThread().getName();
 
     Fn<String, IO<Unit>> verifyThreadName =
-        name -> IO.Delay(() -> assertThat(Thread.currentThread().getName(), equalTo(name)));
+        name -> IO.delay(() -> assertThat(Thread.currentThread().getName(), equalTo(name)));
 
     verifyThreadName.ap(mainThread)
         .flatMap(x -> verifyThreadName.ap(mainThread)
-            .chain(IO.Fork(Resources.executor(0)))
+            .chain(IO.fork(Resources.executor(0)))
             .chain(verifyThreadName.ap(exepectedNames.get(0)))
-            .chain(IO.Fork(Resources.executor(1)))
+            .chain(IO.fork(Resources.executor(1)))
             .chain(verifyThreadName.ap(exepectedNames.get(1)))
-            .chain(IO.Fork(Resources.executor(2)))
+            .chain(IO.fork(Resources.executor(2)))
         )
         .chain(verifyThreadName.ap(exepectedNames.get(2)))
         .run();
@@ -158,7 +156,7 @@ public class IOTest extends IOTestBase {
 
     final long now = System.currentTimeMillis();
     final Integer result = IO.sleep(Resources.getScheduler(), 1000)
-        .chain(Pure(44))
+        .chain(IO.pure(44))
         .run();
 
     assertThat(System.currentTimeMillis() - now > 1000, is(true));
@@ -177,8 +175,8 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void testRaceBlocking() {
-    final IO<Integer> first = IO.Delay(() -> Thread.sleep(500)).map(u -> 22);
-    final IO<String> second = IO.Delay(() -> Thread.sleep(200)).map(u -> "abc");
+    final IO<Integer> first = IO.delay(() -> Thread.sleep(500)).map(u -> 22);
+    final IO<String> second = IO.delay(() -> Thread.sleep(200)).map(u -> "abc");
 
     final Or<Integer, String> result = IO.race(Resources.getMultiPool(), first, second).run();
 
@@ -207,11 +205,11 @@ public class IOTest extends IOTestBase {
 
     final IO<Integer> io1 =
         IO.sleep(Resources.getScheduler(), 300)
-            .chain(IO.Delay(() -> state.updateAndGet(i -> i + 2)));
+            .chain(IO.delay(() -> state.updateAndGet(i -> i + 2)));
 
     final IO<Integer> io2 =
         IO.sleep(Resources.getScheduler(), 600)
-            .chain(IO.Delay(() -> state.updateAndGet(i -> i + 1)));
+            .chain(IO.delay(() -> state.updateAndGet(i -> i + 1)));
 
     final Or<Integer, Integer> result = IO
         .race(Resources.getSinglePool(), io1, io2)

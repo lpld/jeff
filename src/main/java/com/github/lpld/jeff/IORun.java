@@ -13,7 +13,7 @@ import java.util.function.UnaryOperator;
 
 import lombok.RequiredArgsConstructor;
 
-import static com.github.lpld.jeff.IO.Pure;
+import static com.github.lpld.jeff.IO.pure;
 
 /**
  * @author leopold
@@ -97,7 +97,7 @@ public final class IORun {
       } else if (io instanceof Suspend) {
         io = ((Suspend<T>) io).resume.ap();
       } else if (io instanceof Delay) {
-        return Pure(((Delay<T>) io).thunk.ap());
+        return pure(((Delay<T>) io).thunk.ap());
       } else {
         return io;
       }

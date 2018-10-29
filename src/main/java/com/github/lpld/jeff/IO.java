@@ -33,63 +33,101 @@ import static com.github.lpld.jeff.functions.Fn.id;
 /**
  * IO monad for Java, sort of.
  *
+ * It represents a computation of type {@code T} that also can perform a side-effect when evaluated.
+ * IO values can represent both synchronous and asynchronous computations.
+ *
  * @author leopold
  * @since 4/10/18
  */
 @NoArgsConstructor(access = AccessLevel.PACKAGE)
 public abstract class IO<T> {
 
-  public static <T> IO<T> IO(Xn0<T> action) {
-    return Delay(action);
-  }
-
-  public static IO<Unit> IO(XRun action) {
-    return Delay(action);
-  }
-
-  public static final IO<Unit> unit = Pure(Unit.unit);
-
-  public static <T> IO<T> Delay(Xn0<T> action) {
+  /**
+   * Describes a synchronous action that will be evaluated on current thread.
+   */
+  public static <T> IO<T> delay(Xn0<T> action) {
     return new Delay<>(action);
   }
 
-  public static IO<Unit> Delay(XRun action) {
-    return Delay(action.toXn0());
+  public static IO<Unit> delay(XRun action) {
+    return delay(action.toXn0());
   }
 
-  public static <T> IO<T> Suspend(Xn0<IO<T>> resume) {
-    return new Suspend<>(resume);
+  /**
+   * Shortcut for {@link IO#delay}
+   */
+  public static <T> IO<T> IO(Xn0<T> action) {
+    return delay(action);
   }
 
-  public static <T> IO<T> Pure(T pure) {
+  public static IO<Unit> IO(XRun action) {
+    return delay(action);
+  }
+
+  /**
+   * Lift a pure value to IO type.
+   */
+  public static <T> IO<T> pure(T pure) {
     return new Pure<>(pure);
   }
 
-  public static <T> IO<T> Fail(Throwable t) {
+  public static final IO<Unit> unit = pure(Unit.unit);
+
+  /**
+   * Defer the construction of IO value.
+   */
+  public static <T> IO<T> suspend(Xn0<IO<T>> resume) {
+    return new Suspend<>(resume);
+  }
+
+  /**
+   * Create IO that fails with error {@code t}
+   */
+  public static <T> IO<T> fail(Throwable t) {
     return new Fail<>(t);
   }
 
-  public static IO<Unit> Fork(Executor executor) {
-    return Async(onFinish -> executor.execute(() -> onFinish.run(Right(Unit.unit))));
+  /**
+   * Shift the execution of IO to another thread:
+   */
+  public static IO<Unit> fork(Executor executor) {
+    return async(onFinish -> executor.execute(() -> onFinish.run(Right(Unit.unit))));
   }
 
-  public static <T> IO<T> Async(Run1<Run1<Or<Throwable, T>>> f) {
+  /**
+   * Create an IO that represents asynchronous computation. Function {@code f} injects a callback
+   * ({@code Run1<Or<Throwable, T>>}) that user can use to signal completion with either
+   * {@code Or.Right(T)} (successful result) or {@code Or.Left(Throwable)} (failure).
+   */
+  public static <T> IO<T> async(Run1<Run1<Or<Throwable, T>>> f) {
     return new Async<>(cb -> {
       f.run(cb);
       return IO.unit;
     });
   }
 
-  public static <T> IO<T> cancellable(Fn<Run1<Or<Throwable, T>>, IO<Unit>> f) {
-    return new Async<>(f);
+  /**
+   * Create an async IO that can be cancelled. Function {@code f} injects a callback (similar to
+   * {@link IO#async(Run1)}) and expects the user to provide cancellation action. See implementation
+   * of {@link IO#sleep(ScheduledExecutorService, long)} for example.
+   */
+  public static <T> IO<T> cancellable(Fn<Run1<Or<Throwable, T>>, IO<?>> f) {
+    return new Async<>(f.andThen(IO::toUnit));
   }
 
+  /**
+   * IO that never completes.
+   */
   public static <T> IO<T> never() {
-    return Async(cb -> {
+    return async(cb -> {
     });
   }
 
-  public static <L, R> IO<Or<L, R>> race(Executor executor, IO<L> left, IO<R> right) {
+  /**
+   * Initiate a "race" between two IO computations and return an IO that will contain a value of
+   * the IO that completes first. The second IO will be cancelled.
+   */
+  public static <L, R> IO<Or<L, R>> race(Executor executor, IO<L> io1, IO<R> io2) {
 
     return IO.cancellable(callback -> {
       final AtomicBoolean done = new AtomicBoolean();
@@ -100,18 +138,18 @@ public abstract class IO<T> {
         }
       };
 
-      final CancellableIO leftTask = CancellableIO.create();
-      final CancellableIO rightTask = CancellableIO.create();
+      final CancellableIO task1 = CancellableIO.create();
+      final CancellableIO task2 = CancellableIO.create();
 
-      IORun.runAsync(Fork(executor).chain(left), leftTask)
-          .whenComplete((res, err) -> onComplete.run(Left(res), err, rightTask));
+      IORun.runAsync(fork(executor).chain(io1), task1)
+          .whenComplete((res, err) -> onComplete.run(Left(res), err, task2));
 
-      IORun.runAsync(Fork(executor).chain(right), rightTask)
-          .whenComplete((res, err) -> onComplete.run(Right(res), err, leftTask));
+      IORun.runAsync(fork(executor).chain(io2), task2)
+          .whenComplete((res, err) -> onComplete.run(Right(res), err, task1));
 
-      return IO.Delay(() -> {
-        leftTask.cancel();
-        rightTask.cancel();
+      return IO.delay(() -> {
+        task1.cancel();
+        task2.cancel();
       });
     });
   }
@@ -124,7 +162,7 @@ public abstract class IO<T> {
   public static <T, U> IO<Or<Pr<T, IO<U>>, Pr<U, IO<T>>>>
   seq(Executor executor, IO<T> io1, IO<U> io2) {
 
-    return Async(callback -> {
+    return async(callback -> {
 
       final AtomicBoolean fstDone = new AtomicBoolean();
       final CompletableFuture<Object> sndPromise = new CompletableFuture<>();
@@ -148,19 +186,28 @@ public abstract class IO<T> {
             }
           };
 
-      Fork(executor).chain(io1).runAsync()
+      fork(executor).chain(io1).runAsync()
           .handle((res, err) -> Or.of(err, Or.<T, U>Left(res)))
           .thenAccept(onComplete);
-      Fork(executor).chain(io2).runAsync()
+      fork(executor).chain(io2).runAsync()
           .handle((res, err) -> Or.of(err, Or.<T, U>Right(res)))
           .thenAccept(onComplete);
     });
   }
 
+  /**
+   * Same as {@link IO#seq(Executor, IO, IO)}, but for cases when result types of both tasks are
+   * the same. This will allow to work with much simpler type signatures:
+   * {@code Pr<T, IO<T>>} instead of {@code Or<Pr<T, IO<U>>, Pr<U, IO<T>>>}
+   */
   public static <T> IO<Pr<T, IO<T>>> pair(Executor executor, IO<T> io1, IO<T> io2) {
     return seq(executor, io1, io2).map(Or::flatten);
   }
 
+  /**
+   * Create an IO that will complete with values of concurrent execution of {@code io1} and
+   * {@code io2}.
+   */
   public static <T, U> IO<Pr<T, U>> both(Executor executor, IO<T> io1, IO<U> io2) {
     return IO.seq(executor, io1, io2)
         .flatMap(seq -> seq.fold(
@@ -169,37 +216,59 @@ public abstract class IO<T> {
         ));
   }
 
+  /**
+   * Sleep for {@code millis} amount of milliseconds.
+   */
   public static IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
     return IO.cancellable(onFinish -> {
       final ScheduledFuture<?> task = scheduler
           .schedule(() -> onFinish.run(Right(Unit.unit)), millis, TimeUnit.MILLISECONDS);
 
-      return IO.Delay(() -> task.cancel(false)).toUnit();
+      return IO.delay(() -> task.cancel(false));
     });
   }
 
   public static <T> IO<T> fromFuture(CompletableFuture<T> future) {
-    return Async(onFinish -> future.whenComplete((res, err) -> onFinish.run(Or.of(err, res))));
+    return async(onFinish -> future.whenComplete((res, err) -> onFinish.run(Or.of(err, res))));
   }
 
+  /**
+   * Apply transformation {@code f} to this IO.
+   */
   public <U> IO<U> map(Fn<T, U> f) {
-    return flatMap(f.andThen(IO::Pure));
+    return flatMap(f.andThen(IO::pure));
   }
 
+  /**
+   * Shortcut for {@code map(__ -> Unit.unit)}
+   */
   public IO<Unit> toUnit() {
     return map(any -> Unit.unit);
   }
 
+  /**
+   * Compose this IO with another IO that depends on the result of this IO.
+   */
   public <U> IO<U> flatMap(Fn<T, IO<U>> f) {
     return new Bind<>(this, f);
   }
 
+  /**
+   * {@code flatMap} that ignores result of this IO.
+   */
   public <U> IO<U> chain(IO<U> io) {
     return flatMap(t -> io);
   }
 
+  /**
+   * After computing this IO, execute an action {@code io} and ignore it's result.
+   */
   public IO<T> then(IO<?> io) {
     return flatMap(t -> io.map(any -> t));
+  }
+
+  public IO<T> then(Fn<T, IO<?>> f) {
+    return flatMap(t -> f.ap(t).chain(pure(t)));
   }
 
   public IO<Or<Throwable, T>> attempt() {
@@ -207,17 +276,24 @@ public abstract class IO<T> {
   }
 
   public IO<T> recover(Function<Throwable, Optional<T>> r) {
-    return recoverWith(r.andThen(opt -> opt.map(IO::Pure)));
+    return recoverWith(r.andThen(opt -> opt.map(IO::pure)));
   }
 
   public IO<T> recoverWith(Function<Throwable, Optional<IO<T>>> r) {
     return new Recover<>(this, r);
   }
 
+  /**
+   * Trigger asynchronous execution of this IO.
+   */
   public CompletableFuture<T> runAsync() {
     return IORun.runAsync(this, UncancellableIOTask.INSTANCE);
   }
 
+  /**
+   * Synchronously run this IO. This method will block if this IO has asynchronous or blocking
+   * parts.
+   */
   public T run() {
     try {
       return runAsync().get();
@@ -236,7 +312,7 @@ class Delay<T> extends IO<T> {
 
   @Override
   public String toString() {
-    return "Delay(.)";
+    return "delay(.)";
   }
 }
 
@@ -247,7 +323,7 @@ class Suspend<T> extends IO<T> {
 
   @Override
   public String toString() {
-    return "Suspend(.)";
+    return "suspend(.)";
   }
 }
 
@@ -257,7 +333,7 @@ class Pure<T> extends IO<T> {
 
   @Override
   public String toString() {
-    return "Pure(" + pure + ")";
+    return "pure(" + pure + ")";
   }
 }
 
@@ -268,7 +344,7 @@ class Fail<T> extends IO<T> {
 
   @Override
   public String toString() {
-    return "Fail(" + err + ")";
+    return "fail(" + err + ")";
   }
 }
 
@@ -302,6 +378,6 @@ class Async<T> extends IO<T> {
 
   @Override
   public String toString() {
-    return "Async(.)";
+    return "async(.)";
   }
 }

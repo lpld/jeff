@@ -21,11 +21,17 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 
 import static com.github.lpld.jeff.IO.IO;
-import static com.github.lpld.jeff.IO.Pure;
-import static com.github.lpld.jeff.IO.Suspend;
+import static com.github.lpld.jeff.IO.pure;
+import static com.github.lpld.jeff.IO.suspend;
 import static com.github.lpld.jeff.data.Pr.Pr;
 
 /**
+ * Pull-based structure that represents a sequence of potentially effectful values. It means that
+ * evaluation of the elements as well as evaluation of stream structure can result in side-effects.
+ *
+ * However no side-effects will be performed until user reduces the stream to a single IO value
+ * and runs it.
+ *
  * @author leopold
  * @since 10/10/18
  */
@@ -50,7 +56,7 @@ public abstract class Stream<T> {
    * Create a stream by combining a head and a tail.
    */
   public static <T> Stream<T> Cons(T head, Stream<T> tail) {
-    return SCons(Pure(head), tail);
+    return SCons(pure(head), tail);
   }
 
   /**
@@ -61,7 +67,7 @@ public abstract class Stream<T> {
   }
 
   /**
-   * Shortcut for {@code Stream.Defer(IO.Delay(streamEval))}.
+   * Shortcut for {@code Stream.Defer(IO.delay(streamEval))}.
    */
   public static <T> Stream<T> Lazy(Xn0<Stream<T>> streamEval) {
     return Defer(IO(streamEval));
@@ -72,7 +78,7 @@ public abstract class Stream<T> {
    */
   @SafeVarargs
   public static <T> Stream<T> of(T... elements) {
-    return fromList(Arrays.asList(elements), IO::Pure);
+    return fromList(Arrays.asList(elements), IO::pure);
   }
 
   /**
@@ -96,8 +102,8 @@ public abstract class Stream<T> {
    * Create a stream of elements of a given iterable.
    */
   public static <T> Stream<T> ofAll(Iterable<T> elems) {
-    return elems instanceof List ? fromList(((List<T>) elems), IO::Pure)
-                                 : fromIterable(elems, IO::Pure);
+    return elems instanceof List ? fromList(((List<T>) elems), IO::pure)
+                                 : fromIterable(elems, IO::pure);
   }
 
   public static Stream<Unit> awakeEvery(ScheduledExecutorService scheduler, long millis) {
@@ -139,10 +145,10 @@ public abstract class Stream<T> {
   }
 
   private static <T, M> IO<Stream<T>> fromIterator(Iterator<M> iterator, Function<M, IO<T>> f) {
-    return Suspend(() -> {
+    return suspend(() -> {
 
       if (!iterator.hasNext()) {
-        return Pure(Nil());
+        return pure(Nil());
       }
       final M next = iterator.next();
       return fromIterator(iterator, f).map(s -> SCons(f.apply(next), s));
@@ -152,14 +158,14 @@ public abstract class Stream<T> {
   // Unfold that eagerly evaluates the first step:
   private static <T, S> Stream<T> unfoldEager(S z, Xn<S, Optional<Pr<T, S>>> f) throws Throwable {
     return f.ap(z)
-        .map(p -> SCons(Pure(p._1), Lazy((() -> unfoldEager(p._2, f)))))
+        .map(p -> SCons(pure(p._1), Lazy((() -> unfoldEager(p._2, f)))))
         .orElseGet(Stream::Nil);
   }
 
   public abstract <R> IO<R> foldRight(IO<R> z, Fn2<T, IO<R>, IO<R>> f);
 
   public <R> IO<R> foldRight(R z, Fn2<T, R, R> f) {
-    return foldRight(Pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
+    return foldRight(pure(z), (t, ior) -> ior.map(r -> f.ap(t, r)));
   }
 
   /**
@@ -183,7 +189,7 @@ public abstract class Stream<T> {
       return other;
     }
 
-    return Defer(collectRight(Pure(other), (elem, acc) -> Pure(SCons(elem, Defer(acc)))));
+    return Defer(collectRight(pure(other), (elem, acc) -> pure(SCons(elem, Defer(acc)))));
   }
 
   public abstract Stream<T> take(int n);
@@ -218,7 +224,7 @@ public abstract class Stream<T> {
     return extract()
         .flatMap(opt -> opt
             .map(cons -> cons.head.map(h -> Optional.of(Pr(h, cons.tail))))
-            .orElseGet(() -> Pure(Optional.empty()))
+            .orElseGet(() -> pure(Optional.empty()))
         );
   }
 
@@ -229,15 +235,15 @@ public abstract class Stream<T> {
   public abstract Stream<T> filter(Fn<T, Boolean> p);
 
   public IO<Boolean> exists(Fn<T, Boolean> p) {
-    return foldRight(Pure(false), (elem, searchMore) -> p.ap(elem) ? Pure(true) : searchMore);
+    return foldRight(pure(false), (elem, searchMore) -> p.ap(elem) ? pure(true) : searchMore);
   }
 
   public IO<Boolean> forall(Fn<T, Boolean> p) {
-    return foldRight(Pure(true), (elem, searchMore) -> p.ap(elem) ? searchMore : Pure(false));
+    return foldRight(pure(true), (elem, searchMore) -> p.ap(elem) ? searchMore : pure(false));
   }
 
   public Stream<T> reverse() {
-    return Defer(collectLeft(Pure(Nil()), (acc, elem) -> Pure(SCons(elem, Defer(acc)))));
+    return Defer(collectLeft(pure(Nil()), (acc, elem) -> pure(SCons(elem, Defer(acc)))));
   }
 
   public Stream<T> repeat() {
@@ -254,7 +260,7 @@ public abstract class Stream<T> {
    *
    * This method can be implemented in terms of {@code collectRight}:
    * {@code
-   * collectRight(Pure(Optional.empty()), (head, ignore) -> Pure(Optional.of(head)));
+   * collectRight(pure(Optional.empty()), (head, ignore) -> pure(Optional.of(head)));
    * }
    */
   public abstract IO<Optional<IO<T>>> lazyHead();
@@ -340,7 +346,7 @@ class Cons<T> extends Stream<T> {
 
   @Override
   public <R> IO<R> collectRight(IO<R> z, Fn2<IO<T>, IO<R>, IO<R>> f) {
-    return Suspend(() -> f.ap(head, tail.collectRight(z, f)));
+    return suspend(() -> f.ap(head, tail.collectRight(z, f)));
   }
 
   @Override
@@ -350,7 +356,7 @@ class Cons<T> extends Stream<T> {
 
   @Override
   public <R> IO<R> collectLeft(IO<R> z, Fn2<IO<R>, IO<T>, IO<R>> f) {
-    return tail.collectLeft(Suspend(() -> f.ap(z, head)), f);
+    return tail.collectLeft(suspend(() -> f.ap(z, head)), f);
   }
 
   @Override
@@ -398,7 +404,7 @@ class Cons<T> extends Stream<T> {
 
   @Override
   public IO<Optional<IO<T>>> lazyHead() {
-    return Pure(Optional.of(head));
+    return pure(Optional.of(head));
   }
 
   @Override
@@ -408,7 +414,7 @@ class Cons<T> extends Stream<T> {
 
   @Override
   IO<Optional<Cons<T>>> extract() {
-    return Pure(Optional.of(this));
+    return pure(Optional.of(this));
   }
 
 
@@ -531,7 +537,7 @@ class Nil extends Stream<Object> {
 
   @Override
   public <R> IO<R> foldLeft(R z, Fn2<R, Object, R> f) {
-    return Pure(z);
+    return pure(z);
   }
 
   @Override
@@ -576,17 +582,17 @@ class Nil extends Stream<Object> {
 
   @Override
   public IO<Optional<IO<Object>>> lazyHead() {
-    return Pure(Optional.empty());
+    return pure(Optional.empty());
   }
 
   @Override
   public IO<Optional<Object>> headOption() {
-    return Pure(Optional.empty());
+    return pure(Optional.empty());
   }
 
   @Override
   IO<Optional<Cons<Object>>> extract() {
-    return Pure(Optional.empty());
+    return pure(Optional.empty());
   }
 
   @Override

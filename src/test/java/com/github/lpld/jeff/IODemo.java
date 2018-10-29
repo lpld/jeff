@@ -1,25 +1,18 @@
 package com.github.lpld.jeff;
 
-import com.github.lpld.jeff.data.Unit;
-import com.github.lpld.jeff.functions.Fn;
-
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
 
-import static com.github.lpld.jeff.IO.Fail;
-import static com.github.lpld.jeff.IO.Fork;
+import static com.github.lpld.jeff.IO.fail;
+import static com.github.lpld.jeff.IO.fork;
 import static com.github.lpld.jeff.IO.IO;
-import static com.github.lpld.jeff.IO.Pure;
+import static com.github.lpld.jeff.IO.pure;
 import static com.github.lpld.jeff.Recovery.on;
 import static com.github.lpld.jeff.Recovery.rules;
-import static com.github.lpld.jeff.data.Unit.unit;
 
 /**
  * @author leopold
@@ -28,10 +21,10 @@ import static com.github.lpld.jeff.data.Unit.unit;
 public class IODemo {
 
   public static void main(String[] args) {
-    IO.<Integer>Fail(new IllegalArgumentException("1"))
+    IO.<Integer>fail(new IllegalArgumentException("1"))
         .map(i -> i * 55)
         .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
-        .chain(Fail(new IllegalArgumentException("2")))
+        .chain(fail(new IllegalArgumentException("2")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .map(Object::toString)
         .flatMap(Console::printLine)
@@ -45,15 +38,15 @@ public class IODemo {
     final ExecutorService tp2 = Executors.newSingleThreadExecutor();
     final ExecutorService tp3 = Executors.newSingleThreadExecutor();
 
-    Fork(tp1)
-        .chain(Fail(new IllegalArgumentException("3")))
+    fork(tp1)
+        .chain(fail(new IllegalArgumentException("3")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .run();
 
-    IO.<Integer>Fail(new IllegalArgumentException("1"))
-        .flatMap(i -> Fork(tp1).chain(Pure(i * 55)))
+    IO.<Integer>fail(new IllegalArgumentException("1"))
+        .flatMap(i -> fork(tp1).chain(pure(i * 55)))
         .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
-        .flatMap(i -> Fork(tp2).<Integer>chain(Fail(new IllegalArgumentException("2"))))
+        .flatMap(i -> fork(tp2).<Integer>chain(fail(new IllegalArgumentException("2"))))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .map(Object::toString)
         .flatMap(Console::printLine)

@@ -35,7 +35,7 @@ class IOGenHelper {
 
   IO<Object> randomIO(int maxSize, boolean canFail, boolean canRecover) {
 
-    IO<Object> io = IO.Pure(randomObject());
+    IO<Object> io = IO.pure(randomObject());
     for (int i = 0; i < random.nextInt(maxSize); i++) {
       io = chainRandom(io, canFail, canRecover, maxSize - i);
     }
@@ -51,7 +51,7 @@ class IOGenHelper {
 
       case 1:
         if (canFail) {
-          return io.chain(IO.Fail(randomError()));
+          return io.chain(IO.fail(randomError()));
         } else {
           return io;
         }
@@ -59,19 +59,19 @@ class IOGenHelper {
       case 2:
         if (canRecover) {
           final Object recValue = randomObject();
-          return io.recover(err -> Optional.of(IO.Pure(recValue)));
+          return io.recover(err -> Optional.of(IO.pure(recValue)));
         } else {
           final TestException failWith = randomError();
-          return io.recoverWith(err -> Optional.of(IO.Fail(failWith)));
+          return io.recoverWith(err -> Optional.of(IO.fail(failWith)));
         }
 
       case 3:
         final Object delayValue = randomObject();
-        return io.chain(IO.Delay(() -> delayValue));
+        return io.chain(IO.delay(() -> delayValue));
 
       case 4:
         final IO<Object> finalIo = io;
-        return IO.Suspend(() -> finalIo);
+        return IO.suspend(() -> finalIo);
 
       case 5:
         final IO<Object> nestedIO = randomIO(maxNestedSize, canFail, canRecover);
@@ -80,8 +80,8 @@ class IOGenHelper {
       case 6:
         if (canFork) {
           return io
-              .chain(IO.Fork(Resources.executor(random.nextInt(Resources.size()))))
-              .chain(IO.Pure(randomObject()));
+              .chain(IO.fork(Resources.executor(random.nextInt(Resources.size()))))
+              .chain(IO.pure(randomObject()));
         } else {
           return io;
         }

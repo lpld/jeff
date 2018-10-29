@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 
 import static com.github.lpld.jeff.IO.IO;
-import static com.github.lpld.jeff.IO.Pure;
+import static com.github.lpld.jeff.IO.pure;
 import static com.github.lpld.jeff.Stream.Cons;
 import static com.github.lpld.jeff.Stream.Defer;
 import static com.github.lpld.jeff.Stream.Nil;
@@ -43,7 +43,7 @@ public class StreamTest {
   private static <T> List<Stream<T>> buildStreams(T... values) {
     LList<IO<T>> v = LNil.instance();
     for (int i = values.length - 1; i >= 0; i--) {
-      v = v.prepend(Pure(values[i]));
+      v = v.prepend(pure(values[i]));
     }
     return buildStreams(v);
   }
@@ -209,7 +209,7 @@ public class StreamTest {
 
   @Test
   public void testStreamEval() {
-    assertThat(Stream.eval(Pure(5)).toLList().run(), equalTo(LList.of(5)));
+    assertThat(Stream.eval(pure(5)).toLList().run(), equalTo(LList.of(5)));
   }
 
   @Test
@@ -219,7 +219,7 @@ public class StreamTest {
       evaluated.set(true);
       return 4;
     });
-    final Stream<Integer> str = SCons(Pure(3), SCons(io, SCons(Pure(6), Nil())));
+    final Stream<Integer> str = SCons(pure(3), SCons(io, SCons(pure(6), Nil())));
     str.tail().tail().toLList().run();
     assertThat(evaluated.get(), is(false));
   }
@@ -271,7 +271,7 @@ public class StreamTest {
     });
 
     final List<Stream<Integer>> streams =
-        buildStreams(Pure(2), Pure(3), io4, Pure(5), io6, Pure(7));
+        buildStreams(pure(2), pure(3), io4, pure(5), io6, pure(7));
 
     for (Stream<Integer> stream : streams) {
       final BiConsumer<Boolean, Boolean> validate =

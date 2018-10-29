@@ -25,12 +25,12 @@ public class InfiniteTest {
 
     final Stream<Unit> printMem3 = printMemory(30);
 
-//    Stream.eval(IO.Delay(() -> 1)).repeat().drain().run();
+//    Stream.eval(IO.delay(() -> 1)).repeat().drain().run();
 
 //    final Stream<Unit> repeat = Stream.of(Unit.unit).repeat();
 //
     Stream
-        .eval(IO.Delay(() -> time.set(System.currentTimeMillis())))
+        .eval(IO.delay(() -> time.set(System.currentTimeMillis())))
         .append(
               Stream
                 .zip(scheduler, printMem, printMem2)
@@ -44,9 +44,9 @@ public class InfiniteTest {
 
   private static Stream<Unit> printMemory(long delay) {
     return Stream.awakeEvery(scheduler, delay)
-        .chain(IO.Delay(() -> Runtime.getRuntime().freeMemory()))
+        .chain(IO.delay(() -> Runtime.getRuntime().freeMemory()))
         .mapEval(Console::printLine)
-        .chain(IO.Delay(() -> {
+        .chain(IO.delay(() -> {
           final long now = System.currentTimeMillis();
           final long prev = time.get();
 

@@ -62,7 +62,7 @@ public class IOProperties {
   @Property
   public <T, U> void monadLaw_LeftIdentity(T value, Fn<T, IO<U>> fn) {
     checkSameIO(
-        IO.Pure(value).flatMap(fn),
+        IO.pure(value).flatMap(fn),
         fn.ap(value)
     );
   }
@@ -70,7 +70,7 @@ public class IOProperties {
   @Property
   public <T> void monadLaw_RightIdentity(IO<T> value) {
     checkSameIO(
-        value.flatMap(IO::Pure),
+        value.flatMap(IO::pure),
         value
     );
   }
@@ -103,7 +103,7 @@ public class IOProperties {
   public <T, U> void mapPureFlatMap(IO<T> io, Fn<T, U> fn) {
     checkSameIO(
         io.map(fn),
-        io.flatMap(fn.andThen(IO::Pure))
+        io.flatMap(fn.andThen(IO::pure))
     );
   }
 
