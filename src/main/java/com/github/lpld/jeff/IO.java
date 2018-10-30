@@ -81,17 +81,28 @@ public abstract class IO<T> {
   }
 
   /**
-   * Create IO that fails with error {@code t}
+   * Create an IO that fails with an error {@code t}.
    */
   public static <T> IO<T> fail(Throwable t) {
     return new Fail<>(t);
   }
 
   /**
-   * Shift the execution of IO to another thread:
+   * Shift the execution of IO to another thread/thread-pool.
    */
-  public static IO<Unit> fork(Executor executor) {
+  public static IO<Unit> forked(Executor executor) {
     return async(onFinish -> executor.execute(() -> onFinish.run(Right(Unit.unit))));
+  }
+
+  public IO<T> fork(Executor executor) {
+    return this.then(IO.forked(executor));
+  }
+
+  /**
+   * Creates an async boundary.
+   */
+  public IO<T> fork() {
+    return this.then(IO.async(onFinish -> onFinish.run(Right(Unit.unit))));
   }
 
   /**
@@ -141,10 +152,10 @@ public abstract class IO<T> {
       final CancellableIO task1 = CancellableIO.create();
       final CancellableIO task2 = CancellableIO.create();
 
-      IORun.runAsync(fork(executor).chain(io1), task1)
+      IORun.runAsync(IO.forked(executor).chain(io1), task1)
           .whenComplete((res, err) -> onComplete.run(Left(res), err, task2));
 
-      IORun.runAsync(fork(executor).chain(io2), task2)
+      IORun.runAsync(IO.forked(executor).chain(io2), task2)
           .whenComplete((res, err) -> onComplete.run(Right(res), err, task1));
 
       return IO.delay(() -> {
@@ -186,10 +197,10 @@ public abstract class IO<T> {
             }
           };
 
-      fork(executor).chain(io1).runAsync()
+      IO.forked(executor).chain(io1).runAsync()
           .handle((res, err) -> Or.of(err, Or.<T, U>Left(res)))
           .thenAccept(onComplete);
-      fork(executor).chain(io2).runAsync()
+      IO.forked(executor).chain(io2).runAsync()
           .handle((res, err) -> Or.of(err, Or.<T, U>Right(res)))
           .thenAccept(onComplete);
     });

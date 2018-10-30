@@ -80,7 +80,7 @@ class IOGenHelper {
       case 6:
         if (canFork) {
           return io
-              .chain(IO.fork(Resources.executor(random.nextInt(Resources.size()))))
+              .fork(Resources.executor(random.nextInt(Resources.size())))
               .chain(IO.pure(randomObject()));
         } else {
           return io;

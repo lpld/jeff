@@ -141,11 +141,11 @@ public class IOTest extends IOTestBase {
 
     verifyThreadName.ap(mainThread)
         .flatMap(x -> verifyThreadName.ap(mainThread)
-            .chain(IO.fork(Resources.executor(0)))
+            .fork(Resources.executor(0))
             .chain(verifyThreadName.ap(exepectedNames.get(0)))
-            .chain(IO.fork(Resources.executor(1)))
+            .fork(Resources.executor(1))
             .chain(verifyThreadName.ap(exepectedNames.get(1)))
-            .chain(IO.fork(Resources.executor(2)))
+            .fork(Resources.executor(2))
         )
         .chain(verifyThreadName.ap(exepectedNames.get(2)))
         .run();
@@ -212,12 +212,37 @@ public class IOTest extends IOTestBase {
             .chain(IO.delay(() -> state.updateAndGet(i -> i + 1)));
 
     final Or<Integer, Integer> result = IO
-        .race(Resources.getSinglePool(), io1, io2)
+        .race(Resources.getMultiPool(), io1, io2)
         .then(IO.sleep(Resources.getScheduler(), 400))
         .run();
 
     assertThat(result, is(Left(2)));
     assertThat(state.get(), is(2));
+  }
+
+  @Test
+  public void cancelAsync() {
+    final AtomicInteger state = new AtomicInteger();
+    // instead of IO.sleep we use Thread.sleep, which is uncancellable.
+    // but the cancellation still must happen because there is a fork after sleep.
+
+    final IO<Integer> io1 = IO.delay(() -> Thread.sleep(300))
+        .fork()
+        .chain(IO.delay(() -> state.updateAndGet(i -> i + 2)));
+
+    final IO<Integer> io2 = IO.delay(() -> Thread.sleep(600))
+        .fork()
+        .chain(IO.delay(() -> state.updateAndGet(i -> i + 1)));
+
+    final Or<Integer, Integer> result = IO
+        .race(Resources.getMultiPool(), io1, io2)
+        .then(IO.sleep(Resources.getScheduler(), 400))
+        .run();
+
+    assertThat(result, is(Left(2)));
+    assertThat(state.get(), is(2));
+
+
   }
 
   @Test

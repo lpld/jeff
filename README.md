@@ -13,21 +13,27 @@ Jeff has two main classes: `IO` and `Stream`.
 Consider the following program:
 
 ```java
-IO<Unit> printHello = IO(() -> System.out.println("hello"));
+IO<Unit> printLine(String line) {
+    return IO(() -> System.out.println(line));
+}
 
-IO<Unit> program = printHello
-  .chain(printHello)
+IO<Unit> program1 = printLine("hello") 
+  .chain(printLine("hello"));
+
+IO<Unit> printHello = printLine("hello");
+
+IO<Unit> program2 = printHello
   .chain(printHello);
 
-program.run();
+program1.run();
+program2.run();
 
-// this will print:
-// hello
+// both programs will print "hello" twice:
 // hello
 // hello
 ```
 
-As you can see, `printHello` is a value, not a function call. This gives you a great power to compose your program of pure values. You don't have such power with traditional imperative style. If you call, say, `System.out.println` in your code, it will print the line to console right away, without giving you a chance to somehow intervene. As opposed to that, in functional programming you suspend your side effects til the last moment (usually called _"the end of the world"_) and only then you run them: `program.run()`.
+As you can see, `printHello` is a result of calling `printLine("hello")`, and it is a _value_. And values do compose, as opposed to side-effectful function calls. You don't have such power with traditional imperative style. If you call, say, `System.out.println` in your code, it will print the line to console right away, without giving you a chance to somehow intervene. As opposed to that, in functional programming you suspend your side effects til the last moment (usually called _"the end of the world"_) and only then you run them: `program.run()`.
 
 You can watch a great talk by Daniel Spiewak to better understand the motivation behind this approach: [The Making of an IO](https://www.youtube.com/watch?v=g_jP47HFpWA).
 
@@ -124,17 +130,44 @@ IO.async(onFinish ->
   }
 ```
 
-`IO.cancellable` is useful when you use `IO.race`, a function that returns an `IO` that completes with a value of the first of two `IO`s. The second one will be cancelled.
+`IO.cancellable` is useful when you use `IO.race`, that will be described below.
+
+#### never
+
+`IO.never` creates an `IO` that is never completed.
+
+####forked and fork
+
+`IO.forked` allows to switch the evaluation of all following `IO`s in the chain to another thread/thread-pool.
 
 ```java
-final ScheduledThreadPoolExecutor scheduler = ...;
+ExecutorService tp1 = Executors.newSingleThreadExecutor();
+ExecutorService tp2 = Executors.newSingleThreadExecutor();
 
-final IO<String> first = IO.sleep(scheduler, 500).map(u -> 42);
-final IO<String> second = IO.sleep(scheduler, 200).map(u -> "42");
+IO<Unit> printThreadName = IO(() -> System.out.println(Thread.currentThread().getName()));
 
-final Or<Integer, String> result = IO.race(scheduler, first, second).run();
+IO<Unit> program = printThreadName
+   .chain(IO.forked(tp1))
+   .chain(printThreadName)
+   .chain(IO.forked(tp2))
+   .chain(printThreadName);
 
-// Will return Or.Right("42") because second IO completes first.
+program.run();
+// prints:
+// 
+// main
+// pool-1-thread-1
+// pool-2-thread-1
+```
+
+For convenience, you can rewrite this example using `fork` instance method:
+
+```java
+printThreadName
+   .fork(tp1)
+   .chain(printThreadName)
+   .fork(tp2)
+   .chain(printThreadName);
 ```
 
 ### Composing IOs
@@ -208,6 +241,80 @@ IO<String> name = printLine("What is your name?") // IO<Unit>
 // Note, that result type of the expression is IO<String>, while if we
 // used flatMap instead of then, it would be IO<Unit>, because result
 // type of `printLine` function is IO<Unit>.
+```
+
+#### map
+
+`map` is a way to transform an `IO` with a given function.
+
+```java
+IO<String> readLine = IO(() -> System.console().readLine());
+
+IO<Integer> stringLength = readLine.map(String::length);
+```
+
+Note, that `map` can be expressed in terms of `flatMap` and `pure`.
+
+```java
+map(f) <=> flatMap(f.andThen(IO::pure))
+```
+
+####race
+
+`IO.race` initiates a "race" between two `IO`s and creates an `IO` that contains a value of the one that completes first. The second one will be cancelled if possible.
+
+```java
+ScheduledThreadPoolExecutor scheduler = ...;
+
+IO<Integer> first = IO.sleep(scheduler, 500).map(u -> 42);
+IO<String> second = IO.sleep(scheduler, 200).map(u -> "42");
+
+Or<Integer, String> result = IO.race(scheduler, first, second).run();
+
+// Will return Or.Right("42") because second IO completes first.
+```
+
+Cancellation logic works as following:
+
+- If currently running task is cancellable (i.e. was created using `IO.cancellable`) it will be cancelled using its cancel action, and no further tasks will start.
+- If the task is not cancellable, it will continue to run til next async boundary (`async`, `cancellable` or `fork`).
+
+You can use parameterless `fork` method to create a synthetic async boundary. Consider the following example:
+
+```java
+AtomicInteger state = new AtomicInteger();
+
+// These IOs are uncancellable, because there's no async boundary.
+IO<Integer> first = IO(() -> Thread.sleep(200))
+    .chain(IO(() -> state.updateAndGet(i -> i + 2)));
+
+IO<Integer> second = IO(() -> Thread.sleep(500))
+    .chain(IO(() -> state.updateAndGet(i -> i + 1)));
+
+// Now, if we create a race, both tasks will update the state.
+IO.race(threadPool, first, second).run();
+
+// But we could create synthetic async boundary like this:
+IO<Integer> first = IO(() -> Thread.sleep(200))
+    .fork()
+    .chain(IO(() -> state.updateAndGet(i -> i + 2)));
+
+IO<Integer> second = IO(() -> Thread.sleep(500))
+    .fork()
+    .chain(IO(() -> state.updateAndGet(i -> i + 1)));
+
+IO.race(threadPool, first, second).run();
+
+// Now, when the first task completes, it will trigger cancellation of the second task.
+// Second task will check cancellation status when reaching the async boundary (fork) and 
+// won't proceed.
+
+// Note, that there is a race condition in this program, so there is no guarantee that both
+// tasks won't update the state. If you need a strong guarantee that the state will be
+// updated only once, you have to ensure it yourself. In this case it will be sufficient
+// to use `compareAndSet` instead of `updateAndGet`:
+state.compareAndSet(0, 1);
+state.compareAndSet(0, 2);
 ```
 
 ## Stream

@@ -8,7 +8,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static com.github.lpld.jeff.IO.fail;
-import static com.github.lpld.jeff.IO.fork;
 import static com.github.lpld.jeff.IO.IO;
 import static com.github.lpld.jeff.IO.pure;
 import static com.github.lpld.jeff.Recovery.on;
@@ -38,15 +37,17 @@ public class IODemo {
     final ExecutorService tp2 = Executors.newSingleThreadExecutor();
     final ExecutorService tp3 = Executors.newSingleThreadExecutor();
 
-    fork(tp1)
+    IO.forked(tp1)
         .chain(fail(new IllegalArgumentException("3")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .run();
 
     IO.<Integer>fail(new IllegalArgumentException("1"))
-        .flatMap(i -> fork(tp1).chain(pure(i * 55)))
+        .fork(tp1)
+        .map(i -> i * 55)
         .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
-        .flatMap(i -> fork(tp2).<Integer>chain(fail(new IllegalArgumentException("2"))))
+        .fork(tp2)
+        .chain(fail(new IllegalArgumentException("2")))
         .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
         .map(Object::toString)
         .flatMap(Console::printLine)
