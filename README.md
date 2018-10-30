@@ -136,7 +136,7 @@ IO.async(onFinish ->
 
 `IO.never` creates an `IO` that is never completed.
 
-####forked and fork
+#### forked and fork
 
 `IO.forked` allows to switch the evaluation of all following `IO`s in the chain to another thread/thread-pool.
 
@@ -259,7 +259,7 @@ Note, that `map` can be expressed in terms of `flatMap` and `pure`.
 map(f) <=> flatMap(f.andThen(IO::pure))
 ```
 
-####race
+#### race
 
 `IO.race` initiates a "race" between two `IO`s and creates an `IO` that contains a value of the one that completes first. The second one will be cancelled if possible.
 
