@@ -89,7 +89,7 @@ public final class IORun {
 
     while (true) {
       if (io instanceof Fail) {
-        throw ((Fail<T>) io).err;
+        throw ((Fail<T>) io).err.ap();
       } else if (io instanceof Recover) {
         IO<T> finalIo = io;
         stack.addRecoveryRule(err -> ((Recover<T>) finalIo).recover.apply(err).map(f::ap));

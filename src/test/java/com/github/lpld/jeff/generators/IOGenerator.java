@@ -54,7 +54,7 @@ public class IOGenerator extends ComponentizedGenerator<IO> {
 
     if (willFail) {
       return io1
-          .chain(IO.fail(generator.randomError()))
+          .chain(IO.fail(generator::randomError))
           .chain(generator.randomIO(depth2, true, false));
     } else {
       final Object r = generator.randomObject();

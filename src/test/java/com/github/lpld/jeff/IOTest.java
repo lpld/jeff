@@ -53,7 +53,7 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void fail() {
-    final IO<?> fail = IO.fail(new RuntimeException("error"));
+    final IO<?> fail = IO.fail(() -> new RuntimeException("error"));
     thrown.expect(RuntimeException.class);
     thrown.expectMessage("error");
     fail.run();
@@ -72,7 +72,7 @@ public class IOTest extends IOTestBase {
   @Test
   public void failRecover() {
 
-    final String result = IO.<String>fail(new RuntimeException())
+    final String result = IO.<String>fail(RuntimeException::new)
         .recover(err -> Optional.of("333"))
         .run();
 
@@ -81,9 +81,9 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void failRecoverFail() {
-    final IO<?> failed = IO.<String>fail(new RuntimeException("error1"))
+    final IO<?> failed = IO.<String>fail(() -> new RuntimeException("error1"))
         .recover(err -> Optional.of("OK"))
-        .chain(IO.fail(new RuntimeException("error2")));
+        .chain(IO.fail(() -> new RuntimeException("error2")));
     thrown.expect(RuntimeException.class);
     thrown.expectMessage("error2");
     failed.run();
@@ -91,8 +91,8 @@ public class IOTest extends IOTestBase {
 
   @Test
   public void failRecoverFail2() {
-    IO<?> failed = IO.fail(new RuntimeException("error1"))
-        .recoverWith(err -> Optional.of(IO.fail(new RuntimeException("error2"))));
+    IO<?> failed = IO.fail(() -> new RuntimeException("error1"))
+        .recoverWith(err -> Optional.of(IO.fail(() -> new RuntimeException("error2"))));
     thrown.expect(RuntimeException.class);
     thrown.expectMessage("error2");
     failed.run();

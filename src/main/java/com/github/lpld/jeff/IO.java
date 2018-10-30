@@ -4,6 +4,7 @@ import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Pr;
 import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff.functions.Fn;
+import com.github.lpld.jeff.functions.Fn0;
 import com.github.lpld.jeff.functions.Run1;
 import com.github.lpld.jeff.functions.Run3;
 import com.github.lpld.jeff.functions.XRun;
@@ -83,7 +84,7 @@ public abstract class IO<T> {
   /**
    * Create an IO that fails with an error {@code t}.
    */
-  public static <T> IO<T> fail(Throwable t) {
+  public static <T> IO<T> fail(Fn0<Throwable> t) {
     return new Fail<>(t);
   }
 
@@ -212,7 +213,7 @@ public abstract class IO<T> {
    * {@code Pr<T, IO<T>>} instead of {@code Or<Pr<T, IO<U>>, Pr<U, IO<T>>>}
    */
   public static <T> IO<Pr<T, IO<T>>> pair(Executor executor, IO<T> io1, IO<T> io2) {
-    return seq(executor, io1, io2).map(Or::flatten);
+    return IO.seq(executor, io1, io2).map(Or::flatten);
   }
 
   /**
@@ -351,7 +352,7 @@ class Pure<T> extends IO<T> {
 @RequiredArgsConstructor
 class Fail<T> extends IO<T> {
 
-  final Throwable err;
+  final Fn0<Throwable> err;
 
   @Override
   public String toString() {

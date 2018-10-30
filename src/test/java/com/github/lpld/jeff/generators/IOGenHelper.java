@@ -51,7 +51,7 @@ class IOGenHelper {
 
       case 1:
         if (canFail) {
-          return io.chain(IO.fail(randomError()));
+          return io.chain(IO.fail(this::randomError));
         } else {
           return io;
         }
@@ -62,7 +62,7 @@ class IOGenHelper {
           return io.recover(err -> Optional.of(IO.pure(recValue)));
         } else {
           final TestException failWith = randomError();
-          return io.recoverWith(err -> Optional.of(IO.fail(failWith)));
+          return io.recoverWith(err -> Optional.of(IO.fail(() -> failWith)));
         }
 
       case 3:
