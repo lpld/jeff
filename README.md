@@ -1,6 +1,6 @@
 # Jeff: Effects for Java
 
-This library aims to provide a way to work with side-effects in Java in a purely functional way, similar to what [cats-effect](https://typelevel.org/cats-effect/) or [zio](https://scalaz.github.io/scalaz-zio/) do in Scala. Currently, it is on a very early stage of development and can be considered an experiment.
+This library aims to provide a way to work with side-effects in Java in a purely functional way, similar to what [cats-effect](https://typelevel.org/cats-effect/) and [zio](https://scalaz.github.io/scalaz-zio/) do in Scala. Currently, it is on a very early stage of development and can be considered an experiment.
 
 **Jeff** is very much inspired by [cats-effect](https://typelevel.org/cats-effect/), however, because Java lacks the expressiveness Scala has (in particular, it doesn't have [higher-kinded polymorphism](https://en.wikipedia.org/wiki/Kind_(type_theory))), the library can't provide same level of abstraction.
 
@@ -8,7 +8,7 @@ Jeff has two main classes: `IO` and `Stream`.
 
 ## IO
 
-`IO` provides a way to work with effectful computations as if they were pure values. In fact, `IO` instances are pure values. It means that you always can substitute a call to a function that returns `IO` with a result of that function.
+`IO` provides a way to work with effectful computations as if they were pure values. In fact, `IO` instances are pure values. It means that you can always substitute a call to a function that returns `IO` with result of that function.
 
 Consider the following example:
 
@@ -39,21 +39,21 @@ program2.run();
 
 As you can see, `printHello` is a result of calling `printLine("hello")`, and it is a _value_. And values do compose, as opposed to side-effectful function calls. You don't have such power with traditional imperative style. If you call, say, `System.out.println` in your code, it will print the line to console right away, without giving you a chance to somehow intervene. As opposed to that, in functional programming you suspend your side effects til the last moment (usually called _"the end of the world"_) and only then you run them: `program.run()`.
 
-You can watch a great talk by Daniel Spiewak to better understand the motivation behind this approach: [The Making of an IO](https://www.youtube.com/watch?v=g_jP47HFpWA).
+You can watch a great talk by Daniel Spiewak (author of  cats-effect) to better understand the motivation behind this approach: [The Making of an IO](https://www.youtube.com/watch?v=g_jP47HFpWA).
 
 ### Constructing IOs
 
-There are several different ways to construct an `IO`:
+There are several different ways to construct an `IO` :
 
 #### IO.delay
 
-`IO.delay` is a way to describe syncrhonous task that will be evaluated on current thread.
+`IO.delay` is a way to describe a syncrhonous task that will be evaluated on current thread.
 
 ```java
 IO.delay(() -> System.out.println("Hi there"));
 ```
 
-There is a shortcut for `IO.delay`, a method `IO.IO` which can be statically imported and used like this:
+There is a shortcut for `IO.delay`, a static method `IO.IO` that can be statically imported and used like this:
 
 ```java
 IO(() -> System.out.println("Hi there"));
@@ -64,7 +64,7 @@ IO(() -> System.out.println("Hi there"));
 `IO.pure` lets you take a pure value (one that has already been computed) and lift it to `IO` type.
 
 ```java
-IO.pure(5);
+IO<Integer> pureFive = IO.pure(5);
 ```
 
 #### IO.suspend
@@ -98,16 +98,16 @@ IO.fail(() -> new IOException("File not found."));
 public void httpGetAsync(String path, AsyncCallback callback);
 
 interface AsyncCallback {
-    void onSuccess(String result);
+    void onSuccess(HttpResponse result);
     
     void onFailure(HttpResponseException error);
 }
 
-// You can wrap it in IO.async like this:
-IO<String> httpGet = IO.async(onFinish -> 
-    httpGetAsync("https://github.com", new AsyncCallback() {
+// You can wrap it in `IO.async` like this:
+IO<HttpResponse> httpGet = IO.async(onFinish -> 
+    httpGetAsync("https://github.com/lpld/jeff", new AsyncCallback() {
         @Override
-        void onSuccess(String result) {
+        void onSuccess(HttpResponse result) {
             onFinish.run(Or.Right(result));
         }
         
@@ -121,14 +121,16 @@ IO<String> httpGet = IO.async(onFinish ->
 
 `Or.Right` and `Or.Left` are constructors of `Or<L, R>` class, a [coproduct](https://en.wikipedia.org/wiki/Coproduct) type that can hold either `L` or `R`, but not both. It is similar to Scala's [Either](http://lampwww.epfl.ch/~hmiller/scaladoc/library/scala/Either.html).
 
-`IO.cancellable` is very much the same as `IO.async`, but allows you to provide cancellation action. As an example, here is an implementation of function `sleep`, already present in the `IO` class:
+`IO.cancellable` is very much the same as `IO.async`, but allows you to provide cancellation action. As an example, here is an implementation of function `sleep` (already present in the `IO` class):
 
 ```java
   IO<Unit> sleep(ScheduledExecutorService scheduler, long millis) {
     return IO.cancellable(onFinish -> {
+      // scheduling the task:
       final ScheduledFuture<?> task = scheduler
           .schedule(() -> onFinish.run(Right(Unit.unit)), millis, TimeUnit.MILLISECONDS);
 
+      // return cancellation action:
       return IO.delay(() -> task.cancel(false));
     });
   }
@@ -136,11 +138,11 @@ IO<String> httpGet = IO.async(onFinish ->
 
 `IO.cancellable` is useful when you use `IO.race`, that will be described further.
 
-#### never
+#### IO.never
 
 `IO.never` creates an `IO` that is never completed.
 
-#### forked and fork
+#### IO.forked and fork
 
 `IO.forked` allows to switch the evaluation of all following `IO`s in the chain to another thread/thread-pool.
 
@@ -190,7 +192,7 @@ IO<String> s1 = func1();
 IO<String> s2 = func2( ??? );
 ```
 
-The answer is: _Monads_!
+The answer is: _Monads!_
 
 Monads in functional programming are a way to describe sequential computations. It is a very simple yet powerful concept. A monad `M` is somethid that has two functions defined:
 
@@ -206,9 +208,17 @@ The second one is more interesting.
 
 #### flatMap
 
-`flatMap` is an function for sequentially composing two `IO`s.
+`flatMap` is an function for sequentially composing two `IO`s (implemented as an instance method):
 
 ```java
+class IO<T> {
+    // ...
+    
+    IO<U> flatMap(Function<T, IO<U>> f) {
+        // ...
+    }
+}
+
 IO<String> readLine = IO(() -> System.console().readLine());
 IO<Unit> printLine(String str) {
     return IO(() -> System.out.println(str));
@@ -217,8 +227,6 @@ IO<Unit> printLine(String str) {
 IO<Unit> program = printLine("What is your name?")
     .flatMap(u -> readLine)
     .flatMap(name -> printLine("Nice to meet you " + name));
-
-program.run();
 ```
 
 Note that `flatMap` accepts a function from `T` to `IO<U>`. In other words, in order to produce `IO<U>` it needs a value `T` from previous computation step. It means that there is a guarantee that function `f` won't be called before value `T` is computed.
@@ -238,7 +246,7 @@ printLine("What is your name?").chain(readLine);
 `then` is quite the opposite of `chain`: it ignores the value produced by function `f` and returns value from the previous step.
 
 ```java
-IO<String> name = printLine("What is your name?") // IO<Unit>
+IO<String> printedName = printLine("What is your name?") // IO<Unit>
     .chain(readLine) // IO<String>
     .then(name -> printLine("Hello " + name));
 
@@ -259,7 +267,7 @@ IO<Integer> stringLength = readLine.map(String::length);
 
 Note, that `map(f)` can be expressed in terms of `flatMap` and `pure`: `flatMap(f.andThen(IO::pure))`
 
-#### race
+#### IO.race
 
 `IO.race` initiates a "race" between two `IO` tasks and creates an `IO` that contains a value of the one that completes first. The second one will be cancelled if possible.
 
@@ -284,19 +292,21 @@ You can use parameterless `fork` method to create a synthetic async boundary. Co
 ```java
 AtomicInteger state = new AtomicInteger();
 
-// Generally speaking, it's not a good idea to user Thread.sleep, because it will
-// block current thread of execution, but we will use it as an example of uncancellable task:
+// Generally speaking, it's not a good idea to use Thread.sleep,
+// because it blocks current thread of execution, but we will
+// use it as an example of uncancellable task:
 IO<Integer> first = IO(() -> Thread.sleep(200))
     .chain(IO(() -> state.updateAndGet(i -> i + 2)));
 
 IO<Integer> second = IO(() -> Thread.sleep(500))
     .chain(IO(() -> state.updateAndGet(i -> i + 1)));
 
-// Now, if we create a race, both tasks will update the state, because neither they have
-// cancel action defined, nor there is an async boundary in them.
+// Now, if we create a race, both tasks will update the state,
+// because neither they have a cancel action defined, nor there is an
+// async boundary in any of them.
 IO.race(threadPool, first, second).run();
 
-// But we could create synthetic async boundary like this:
+// But we could create a synthetic async boundary:
 IO<Integer> first = IO(() -> Thread.sleep(200))
     .fork()
     .chain(IO(() -> state.updateAndGet(i -> i + 2)));
@@ -307,18 +317,19 @@ IO<Integer> second = IO(() -> Thread.sleep(500))
 
 IO.race(threadPool, first, second).run();
 
-// Now, when the first task completes, it will trigger cancellation of the second task.
-// Second task will check cancellation status when reaching the async boundary (fork) and 
-// won't proceed.
+// Now, when the first task completes, it will trigger cancellation
+// of the second task. Second task will check cancellation status
+// when reaching the async boundary (fork) and won't proceed to 
+// updating the state.
 ```
 Note, that there is a race condition in this program, so there is still no guarantee that both tasks won't update the state. If you need a strong guarantee that the state will be updated only once, you have to ensure it yourself. In this case it will be sufficient to use `compareAndSet` instead of `updateAndGet`:
 ```java
 state.compareAndSet(0, 1);
 ```
 
-#### seq
+#### IO.seq
 
-`IO.seq` can be useful when you need to non-deterministacally place two concurrent IO tasks in a sequence in the order of their completion.
+`IO.seq` can be useful when you need to non-deterministacally place two concurrent IO tasks in a sequence, in the order of their completion.
 
 ```java
 IO<Integer> first = ...;
@@ -330,9 +341,9 @@ IO<Or<Pr<Integer, IO<String>>, Pr<String, IO<Integer>>>> whoIsFaster =
 
 Return type of this method is a bit clumsy, but it basically means that the resulting `IO` will complete either with a value of type `Pr<Integer, IO<String>>` or a value of type `Pr<String, IO<Integer>>>`, depending on which of the two `IO`s completes first. `Pr<A, B>` is a [product](https://en.wikipedia.org/wiki/Product_(category_theory)) type that contains both `A` and `B`, also known as _pair_ or [_tuple_](https://en.wikipedia.org/wiki/Tuple). In the example above if `first` task completes first, then the result will be `Pr<Integer, IO<String>>`. At the moment when `whoIsFaster` is completed, `first` is completed too, so the `Integer` part of the result is pure (not wrapped in an `IO`). But `second` task is still running (might even be forever), that's why its result is wrapped: `IO<String>`.
 
-#### pair and both
+#### IO.pair and IO.both
 
-There are two variations of `IO.seq` with a bit clearer return types. 
+There are two variations of `IO.seq` with a bit clearer return types.
 
 If both tasks that are passed into `IO.seq` have the same type, we can be a little bit more concise.
 
@@ -340,18 +351,20 @@ If both tasks that are passed into `IO.seq` have the same type, we can be a litt
 IO<String> first = ...;
 IO<String> second = ...;
 
-IO<Or<Pr<String, IO<String>>, Pr<String, IO<String>>>> result =
-    IO.seq(executor, first, second); 
+IO<Or<Pr<String, IO<String>>, Pr<String, IO<String>>>> whoIsFaster =
+    IO.seq(executor, first, second);
 ```
 
-Here `result` can complete with either `Pr<String, IO<String>>>` or `Pr<String, IO<String>>>`, which is the same type, so in this case we can use `IO.pair`:
+Here `whoIsFaster` can complete with either `Pr<String, IO<String>>>` or `Pr<String, IO<String>>>`, which is the same type, so in this case we can use `IO.pair`:
 
 ```java
 IO<String> first = ...;
 IO<String> second = ...;
 
-IO<Pr<String, IO<String>> result = IO.pair(executor, first, second); 
+IO<Pr<String, IO<String>> whoIsFaster = IO.pair(executor, first, second);
 ```
+
+But of course, in this case you lose the information about which task has completed in which order.
 
 If you need both `IO` tasks to complete, than you can use `IO.both`.
 
@@ -361,6 +374,10 @@ IO<Integer> second = ...;
 
 IO<Pr<String, Integer>> result = IO.both(executor, first, second);
 ```
+
+### Stackless recursion with IO
+
+Recursion is one of the main tools in functional programmer's arsenal.
 
 ## Stream
 
