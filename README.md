@@ -377,7 +377,55 @@ IO<Pr<String, Integer>> result = IO.both(executor, first, second);
 
 ### Stackless recursion with IO
 
-Recursion is one of the main tools in functional programmer's arsenal.
+[Recursion](https://en.wikipedia.org/wiki/Recursion_(computer_science)) is one of the main tools in functional programmer's arsenal, but unfortunately its usage in languages like Java is very limited for a simple reason: each method call takes a [stack](https://en.wikipedia.org/wiki/Call_stack) frame, and stack is limited.
+
+Consider this naive _factorial_ function, implemented using recursion:
+
+```java
+BigInteger factorial(BigIteger n) {
+  return n == 0
+         ? BigInteger.ONE
+         : factorial(n - 1).multiply(BigInteger.valueOf(n));
+}
+```
+
+It works for relatively small `n` values, but when called for big numbers (try calling it for 1,000,000) it fails with [StackOverflowError](https://docs.oracle.com/javase/8/docs/api/java/lang/StackOverflowError.html) for obvious reasons.
+
+Some languages can optimize function calls that are in [tail position](https://en.wikipedia.org/wiki/Tail_call) by not adding a frame to the call stack for them. If Java had tail call elimination, we could rewrite factorial function so that the recursive call is the final action of the function:
+
+```java
+BigInteger factorial(long n) {
+  return countFactorial(n, BigInteger.ONE);
+}
+
+// auxiliary tail-recursive function
+BigInteger countFactorial(long n, BigInteger accum) {
+  return n == 0
+         ? accum
+         // recursive call is in tail position:
+         : countFactorial(n - 1, accum.multiply(BigInteger.valueOf(n)));
+}
+```
+
+But Java doesn't optimize tail calls, so this won't change anything. But we could use a technique called trampolining.
+
+**Trampolining** is a technique for writing stack-safe recursive functions in languages with limited stack. We could utilize this technique using `IO`:
+
+```java
+BigInteger factorial(long n) {
+  return countFactorial(n, BigInteger.ONE).run();
+}
+
+IO<BigInteger> countFactorial(long n, BigInteger accum) {
+  return IO.suspend(() ->
+    n == 0
+    ? IO.pure(accum)
+    : countFactorial(n - 1, accum.multiply(BigInteger.valueOf(n)))
+  );
+}
+```
+
+As you can see, this looks quite similar to the previous example, except that `countFactorial` does not perform the actual computation when called, but suspends it using `IO.suspend` and returns an instance of `IO<BigInteger>` which is just a description of what has to be done. When this `IO` is evaluated using `run` method it will sequentually execute all nested suspended computations without taking stack frames. This is also called 'trading stack for heap', because in this case we use heap to store all intermediate `IO` objects.
 
 ## Stream
 

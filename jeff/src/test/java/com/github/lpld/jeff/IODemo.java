@@ -3,6 +3,7 @@ package com.github.lpld.jeff;
 import com.github.lpld.jeff.data.Or;
 import com.github.lpld.jeff.data.Pr;
 
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Paths;
@@ -22,14 +23,17 @@ import static com.github.lpld.jeff.Recovery.rules;
 public class IODemo {
 
   public static void main(String[] args) {
-    IO.<Integer>fail(() -> new IllegalArgumentException("1"))
-        .map(i -> i * 55)
-        .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
-        .chain(fail(() -> new IllegalArgumentException("2")))
-        .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
-        .map(Object::toString)
-        .flatMap(Console::printLine)
-        .run();
+
+    System.out.println(countFactorial(5, BigInteger.ONE));
+//
+//    IO.<Integer>fail(() -> new IllegalArgumentException("1"))
+//        .map(i -> i * 55)
+//        .recover(rules(on(IllegalArgumentException.class).doReturn(4)))
+//        .chain(fail(() -> new IllegalArgumentException("2")))
+//        .recover(rules(on(IllegalArgumentException.class).doReturn(66)))
+//        .map(Object::toString)
+//        .flatMap(Console::printLine)
+//        .run();
 
   }
 
@@ -58,6 +62,31 @@ public class IODemo {
     tp1.shutdown();
     tp2.shutdown();
     tp3.shutdown();
+  }
+
+  public static BigInteger factorial(long n) {
+    return countFactorial(n, BigInteger.ONE).run();
+  }
+
+  public static BigInteger countUnsafe(long n, BigInteger accum) {
+    return n == 0
+           ? accum
+           : countUnsafe(n - 1, accum.multiply(BigInteger.valueOf(n)));
+  }
+
+  public static IO<BigInteger> factorial2(long n) {
+    return n == 0
+           ? IO.pure(BigInteger.ONE)
+           : factorial2(n - 1).map(f -> f.multiply(BigInteger.valueOf(n)));
+  }
+
+  public static IO<BigInteger> countFactorial(long n, BigInteger accum) {
+
+    return IO.suspend(
+        () -> n == 0
+              ? IO.pure(accum)
+              : countFactorial(n - 1, accum.multiply(BigInteger.valueOf(n)))
+    );
   }
 
   public void asdf () {

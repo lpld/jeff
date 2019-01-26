@@ -220,6 +220,9 @@ public abstract class Stream<T> {
 
   abstract IO<Optional<Cons<T>>> extract();
 
+  /**
+   * Split the stream into a head and a tail
+   */
   public IO<Optional<Pr<T, Stream<T>>>> split() {
     return extract()
         .flatMap(opt -> opt
@@ -280,12 +283,14 @@ public abstract class Stream<T> {
 
     return Defer(
         IO.both(executor, stream1.extract(), stream2.extract())
-            .map(res -> res._1.isPresent() && res._2.isPresent() ? Defer(
-                IO.both(executor, res._1.get().head, res._2.get().head)
-                    .map(pr -> Cons(combine.ap(pr._1, pr._2),
-                                    Stream.zipWith(executor, res._1.get().tail, res._2.get().tail,
-                                                   combine)))
-            ) : Nil()));
+            .map(res -> res._1.isPresent() && res._2.isPresent()
+                        ? Defer(IO.both(executor, res._1.get().head, res._2.get().head)
+                                    .map(pr -> Cons(
+                                        combine.ap(pr._1, pr._2),
+                                        Stream.zipWith(executor, res._1.get().tail, res._2.get().tail, combine)
+                                    )))
+                        : Nil()
+            ));
   }
 
   public static <T, U> Stream<Pr<T, U>> zip(Executor executor,
@@ -310,8 +315,7 @@ public abstract class Stream<T> {
     return Defer(
         IO.pair(executor, stream1.split(), stream2.split())
             .map(seq -> {
-              final Stream<T> str2 =
-                  Defer(seq._2.map(opt -> opt.map(ht -> Cons(ht._1, ht._2)).orElse(Nil())));
+              final Stream<T> str2 = Defer(seq._2.map(opt -> opt.map(ht -> Cons(ht._1, ht._2)).orElse(Nil())));
 
               return seq._1
                   .map(ht -> Cons(ht._1, merge(executor, ht._2, str2)))
