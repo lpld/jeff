@@ -1,5 +1,7 @@
 package com.github.lpld.jeff_examples.tetris;
 
+import java.util.function.Function;
+
 import io.vavr.collection.List;
 import io.vavr.collection.Seq;
 import io.vavr.control.Option;
@@ -20,4 +22,10 @@ public class Utils {
     );
   }
 
+  /**
+   * Create a function that applies function f `times` times
+   */
+  public static <A> Function<A, A> multF(Function<A, A> f, int times) {
+    return List.range(0, times).foldLeft(Function.identity(), (c, t) -> c.andThen(f));
+  }
 }

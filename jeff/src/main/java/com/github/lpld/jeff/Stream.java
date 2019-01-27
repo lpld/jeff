@@ -106,7 +106,7 @@ public abstract class Stream<T> {
                                  : fromIterable(elems, IO::pure);
   }
 
-  public static Stream<Unit> awakeEvery(ScheduledExecutorService scheduler, long millis) {
+  public static Stream<Unit> tick(ScheduledExecutorService scheduler, long millis) {
     return Stream.eval(IO.sleep(scheduler, millis)).repeat();
   }
 
@@ -130,6 +130,10 @@ public abstract class Stream<T> {
 
   public static <T> Stream<T> iterate(Xn0<Optional<T>> more) {
     return unfold(Unit.unit, u -> more.ap().map(next -> Pr(next, Unit.unit)));
+  }
+
+  public static Stream<Integer> integers() {
+    return unfold(0, prev -> Optional.of(Pr(prev, prev + 1)));
   }
 
   private static <T, M> Stream<T> fromList(List<M> list, Function<M, IO<T>> f) {
@@ -174,6 +178,8 @@ public abstract class Stream<T> {
   public abstract <R> IO<R> collectRight(IO<R> z, Fn2<IO<T>, IO<R>, IO<R>> f);
 
   public abstract <R> IO<R> foldLeft(R z, Fn2<R, T, R> f);
+
+  public abstract <R> Stream<R> scanLeft(R z, Fn2<R, T, R> f);
 
   /**
    * Similar to foldLeft, but does not evaluate elements
@@ -277,25 +283,24 @@ public abstract class Stream<T> {
     return foldLeft(Unit.unit, (u, any) -> u);
   }
 
-  public static <T, U, V> Stream<V> zipWith(Executor executor,
-                                            Stream<T> stream1, Stream<U> stream2,
+  public static <T, U, V> Stream<V> zipWith(Stream<T> stream1, Stream<U> stream2,
                                             Fn2<T, U, V> combine) {
 
     return Defer(
-        IO.both(executor, stream1.extract(), stream2.extract())
-            .map(res -> res._1.isPresent() && res._2.isPresent()
-                        ? Defer(IO.both(executor, res._1.get().head, res._2.get().head)
-                                    .map(pr -> Cons(
-                                        combine.ap(pr._1, pr._2),
-                                        Stream.zipWith(executor, res._1.get().tail, res._2.get().tail, combine)
-                                    )))
-                        : Nil()
-            ));
+        IOFunctions.map2(stream1.extract(), stream2.extract(), (cons1, cons2) ->
+            IOFunctions.map2Opt(cons1, cons2, (c1, c2) -> SCons(
+                IOFunctions.map2(c1.head, c2.head, combine),
+                zipWith(c1.tail, c2.tail, combine)
+            )).orElseGet(Stream::Nil)
+        ));
   }
 
-  public static <T, U> Stream<Pr<T, U>> zip(Executor executor,
-                                            Stream<T> stream1, Stream<U> stream2) {
-    return zipWith(executor, stream1, stream2, Pr::of);
+  public Stream<Pr<T, Integer>> zipWithIndex() {
+    return zip(this, Stream.integers());
+  }
+
+  public static <T, U> Stream<Pr<T, U>> zip(Stream<T> stream1, Stream<U> stream2) {
+    return zipWith(stream1, stream2, Pr::of);
   }
 
   public Stream<T> merge(Executor executor, Stream<T> other) {
@@ -356,6 +361,15 @@ class Cons<T> extends Stream<T> {
   @Override
   public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
     return head.flatMap(h -> tail.foldLeft(f.ap(z, h), f));
+  }
+
+  @Override
+  public <R> Stream<R> scanLeft(R z, Fn2<R, T, R> f) {
+    return Defer(head.map(h -> {
+      final R r = f.ap(z, h);
+
+      return Cons(r, tail.scanLeft(r, f));
+    }));
   }
 
   @Override
@@ -446,6 +460,11 @@ class Defer<T> extends Stream<T> {
   @Override
   public <R> IO<R> foldLeft(R z, Fn2<R, T, R> f) {
     return evalStream.flatMap(s -> s.foldLeft(z, f));
+  }
+
+  @Override
+  public <R> Stream<R> scanLeft(R z, Fn2<R, T, R> f) {
+    return Defer(evalStream.map(s -> s.scanLeft(z, f)));
   }
 
   @Override
@@ -542,6 +561,11 @@ class Nil extends Stream<Object> {
   @Override
   public <R> IO<R> foldLeft(R z, Fn2<R, Object, R> f) {
     return pure(z);
+  }
+
+  @Override
+  public <R> Stream<R> scanLeft(R z, Fn2<R, Object, R> f) {
+    return instance();
   }
 
   @Override

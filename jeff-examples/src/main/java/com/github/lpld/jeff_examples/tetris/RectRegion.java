@@ -6,6 +6,7 @@ import io.vavr.collection.Array;
 import io.vavr.collection.List;
 import io.vavr.collection.Stream;
 import io.vavr.control.Option;
+import lombok.Getter;
 
 import static com.github.lpld.jeff_examples.tetris.Utils.sequenceOptSeq;
 import static io.vavr.API.None;
@@ -17,6 +18,7 @@ import static io.vavr.API.Some;
  */
 public class RectRegion {
 
+  @Getter
   private final Array<Array<Boolean>> cells;
   private final int height;
   private final int width;
@@ -25,6 +27,32 @@ public class RectRegion {
     this.cells = cells;
     this.height = cells.size();
     this.width = cells.headOption().map(Array::size).getOrElse(0);
+  }
+
+  public static RectRegion parse(String... lines) {
+
+    final Array<Array<Boolean>> cells =
+        Stream.of(lines)
+            .map(String::trim)
+            .map(line -> Stream
+                .ofAll(line.toCharArray())
+                .map(cell -> cell == 'X')
+                .toArray()
+            ).toArray();
+
+    return new RectRegion(cells);
+  }
+
+  public static RectRegion ofSize(int height, int width) {
+    return new RectRegion(Array.fill(height, Array.fill(width, false)));
+  }
+
+  public int height() {
+    return height;
+  }
+
+  public int width() {
+    return width;
   }
 
   public boolean get(int i, int j) {
@@ -103,9 +131,8 @@ public class RectRegion {
             )
         );
 
-    return sequenceOptSeq(combined.map(Utils::sequenceOptSeq)).map(
-        newCells -> new RectRegion(newCells.map(List::toArray).toArray())
-    );
+    return sequenceOptSeq(combined.map(Utils::sequenceOptSeq))
+        .map(newCells -> new RectRegion(newCells.map(List::toArray).toArray()));
   }
 
   // Combine two values only if they are not both true.

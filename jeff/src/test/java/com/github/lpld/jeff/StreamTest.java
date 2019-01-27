@@ -374,9 +374,25 @@ public class StreamTest {
   }
 
   @Test
+  public void testScanLeft() {
+    System.out.println(Stream.integers()
+                           .scanLeft(0, (i, i2) -> i + i2)
+                           .takeWhile(i -> i < 400)
+                           .toLList()
+                           .run());
+
+//
+//    final LList<Integer> result = Stream(1, 2, 3, 4, 5)
+//        .scanLeft(0, (i, i2) -> i + i2)
+//        .toLList()
+//        .run();
+
+  }
+
+  @Test
   public void testSleep() {
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    Stream.awakeEvery(scheduler, 500)
+    Stream.tick(scheduler, 500)
         .take(10)
         .mapEval(i -> Console.printLine("123"))
         .drain()
@@ -388,12 +404,12 @@ public class StreamTest {
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     final Stream<Unit> s1 = Stream
-        .awakeEvery(scheduler, 130)
+        .tick(scheduler, 130)
         .chain(Console.printLine("1"))
         .take(10);
 
     final Stream<Unit> s2 = Stream
-        .awakeEvery(scheduler, 260)
+        .tick(scheduler, 260)
         .chain(Console.printLine("2"))
         .take(4);
 
@@ -402,21 +418,36 @@ public class StreamTest {
         .run();
   }
 
+//  @Test
+//  public void testMerge2() {
+//    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+//
+//    final Stream<Integer> stream1 = Stream
+//        .tick(scheduler, 130)
+//        .chain(IO.pure(3));
+//
+//    final Stream<Integer> stream2 = Stream.<Integer>Nil().map((i) -> i * 2);
+//
+//    stream2.merge(scheduler, stream1)
+//        .mapEval(i -> IO(() -> System.out.println("tick")))
+//        .drain().run();
+//  }
+
   @Test
   public void testZip() {
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     final Stream<Unit> s1 = Stream
-        .awakeEvery(scheduler, 130)
+        .tick(scheduler, 130)
         .chain(Console.printLine("1"))
         .take(10);
 
     final Stream<Unit> s2 = Stream
-        .awakeEvery(scheduler, 260)
+        .tick(scheduler, 260)
         .chain(Console.printLine("2"))
         .take(4);
 
-    Stream.zip(scheduler, s1, s2)
+    Stream.zip(s1, s2)
         .drain()
         .run();
   }

@@ -32,8 +32,7 @@ public class InfiniteTest {
     Stream
         .eval(IO.delay(() -> time.set(System.currentTimeMillis())))
         .append(
-              Stream
-                .zip(scheduler, printMem, printMem2)
+            Stream.zip(printMem, printMem2)
                 .map(__ -> Unit.unit)
                 .merge(scheduler, printMem3)
         )
@@ -43,7 +42,7 @@ public class InfiniteTest {
   }
 
   private static Stream<Unit> printMemory(long delay) {
-    return Stream.awakeEvery(scheduler, delay)
+    return Stream.tick(scheduler, delay)
         .chain(IO.delay(() -> Runtime.getRuntime().freeMemory()))
         .mapEval(Console::printLine)
         .chain(IO.delay(() -> {
