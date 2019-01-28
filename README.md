@@ -439,3 +439,23 @@ As you can see, this looks quite similar to the previous example, except that `c
         .flatMap(Console::printLine)
         .run();
 ```
+
+to be continuted...
+
+## Examples
+
+`jeff-examples`  project contains a sample app, console Tetris game, written using Jeff Streams and [vavr](https://github.com/vavr-io/vavr) library. To run the app:
+
+```bash
+# install jeff first
+cd jeff
+mvn clean install
+
+# compile jeff-examples
+cd ../jeff-examples
+mvn clean package
+
+# and run it
+chmod +x runTetris.sh
+./runTetris.sh
+```

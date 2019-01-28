@@ -5,6 +5,7 @@ import com.github.lpld.jeff.data.Unit;
 import com.github.lpld.jeff_examples.tetris.Tetris.GameState;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -21,35 +22,47 @@ public class TetrisApp {
   private static final int WIDTH = 15;
 
   public static void main(String[] args) throws IOException {
-    System.out.println("Starting tetris app!");
+
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    final ExecutorService userInputExecutor = Executors.newSingleThreadExecutor();
 
-    final Tetris tetris = new Tetris(HEIGHT, WIDTH, new UserInput().getMoves(), scheduler);
+    try {
+      // input needs an executor, because it uses blocking IO.
+      final PlayerInput playerInput = new PlayerInput(userInputExecutor);
 
-    final IO<Unit> drawTheGame = Console.eraseScreen.chain(
-        tetris.gameStates()
-            .mapEval(u -> IO.unit)
-            .drain()
-    );
+      final Tetris tetris = new Tetris(HEIGHT, WIDTH, playerInput.getInteractions(), scheduler);
 
-    drawTheGame.run();
-    scheduler.shutdown();
+      eraseScreen
+          // taking the stream of game states
+          .chain(tetris.gameStates()
+                     // and printing each of them
+                     .mapEval(TetrisApp::printState)
+                     .drain()
+          ).run();
+
+    } finally {
+      scheduler.shutdown();
+      userInputExecutor.shutdown();
+    }
   }
 
-  private static IO<Unit> printState(GameState state) {
-    System.out.println("Printing");
+  private static IO<Unit> eraseScreen = AnsiOut.create.then(AnsiOut::eraseScreen).flatMap(AnsiOut::flush);
 
-    return Console.printLinesAt(1, 1, state.getFieldWithPiece().getCells().map(TetrisApp::showRow))
-        .chain(Console.printAt(2, WIDTH + 2, "Score: " + state.getScore()))
-        .chain(Console.printAt(3, WIDTH + 2, "Level: " + state.getLevel()))
-        .chain(Console.printAt(5, WIDTH + 2, "Next: "))
-        .chain(Console.printLinesAt(7, WIDTH + 3, List.fill(4, "...."))) // erase
-        .chain(Console.printLinesAt(7, WIDTH + 3, state.getPiecesSource()._1.getCells().map(TetrisApp::showRow)))
+  private static IO<Unit> printState(GameState state) {
+
+    return AnsiOut.create
+        .then(a -> a.printLinesAt(1, 1, state.getFieldWithPiece().getCells().map(TetrisApp::showRow)))
+
+        .then(a -> a.printAt(2, WIDTH + 2, "Score: " + state.getScore()))
+        .then(a -> a.printAt(3, WIDTH + 2, "Level: " + state.getLevel()))
+        .then(a -> a.printAt(5, WIDTH + 2, "Next: "))
+        .then(a -> a.printLinesAt(7, WIDTH + 3, List.fill(4, "...."))) // erase
+        .then(a -> a.printLinesAt(7, WIDTH + 3, state.getPiecesSource()._1.getCells().map(TetrisApp::showRow)))
 
         // intentionally adding extra space in the end to clear previous output:
-        .chain(
-            Console.printAt(12, WIDTH + 2, "Lines left: " + (Tetris.LINES_PER_LEVEL - state.getLinesCleared()) + " "))
-        .chain(Console.cursor(HEIGHT + 1, 0));
+        .then(a -> a.printAt(12, WIDTH + 2, "Lines left: " + (Tetris.LINES_PER_LEVEL - state.getLinesCleared()) + " "))
+        .then(a -> a.cursor(HEIGHT + 1, 0))
+        .flatMap(AnsiOut::flush);
   }
 
   private static String showRow(Seq<Boolean> row) {

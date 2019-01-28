@@ -8,11 +8,13 @@ import io.vavr.collection.Stream;
 import io.vavr.control.Option;
 import lombok.Getter;
 
-import static com.github.lpld.jeff_examples.tetris.Utils.sequenceOptSeq;
+import static com.github.lpld.jeff_examples.tetris.Utils.sequenceSeqOpt;
 import static io.vavr.API.None;
 import static io.vavr.API.Some;
 
 /**
+ * Rectangular region that consists of empty or filled cells.
+ *
  * @author leopold
  * @since 2019-01-26
  */
@@ -29,6 +31,9 @@ public class RectRegion {
     this.width = cells.headOption().map(Array::size).getOrElse(0);
   }
 
+  /**
+   * Create a region from string lines.
+   */
   public static RectRegion parse(String... lines) {
 
     final Array<Array<Boolean>> cells =
@@ -43,6 +48,9 @@ public class RectRegion {
     return new RectRegion(cells);
   }
 
+  /**
+   * Create empty region of given dimensions.
+   */
   public static RectRegion ofSize(int height, int width) {
     return new RectRegion(Array.fill(height, Array.fill(width, false)));
   }
@@ -55,18 +63,34 @@ public class RectRegion {
     return width;
   }
 
+  /**
+   * Get boolean value of a cell at given coordinates.
+   */
   public boolean get(int i, int j) {
     return cells.get(i).get(j);
   }
 
+  // array of vertical indices: [0 ... height]
   private Array<Integer> vertIndices() {
     return Array.range(0, height);
   }
 
+  // array of horizontal indices: [0 ... weight]
   private Array<Integer> horIndices() {
     return Array.range(0, width);
   }
 
+  /**
+   * Rotate this region clockwise.
+   * <pre>
+   * {@code
+   *   .XX.    ...
+   *   .X.. -> XXX
+   *   .X..    ..X
+   *           ...
+   * }
+   * </pre>
+   */
   public RectRegion rotate() {
     if (height == 0) {
       return this;
@@ -79,6 +103,16 @@ public class RectRegion {
     );
   }
 
+  /**
+   * Mirror this region vertically.
+   * <pre>
+   * {@code
+   *   .XX.    .XX.
+   *   .X.. -> ..X.
+   *   .X..    ..X.
+   * }
+   * </pre>
+   */
   public RectRegion mirror() {
     if (height == 0) {
       return this;
@@ -91,6 +125,9 @@ public class RectRegion {
     );
   }
 
+  /**
+   * Remove filled rows and add empty rows on top of the region instead of them.
+   */
   public Option<Pr<RectRegion, Integer>> clearFilledRows() {
 
     final Array<Array<Boolean>> newCells = cells.filter(row -> row.exists(b -> !b));
@@ -107,6 +144,15 @@ public class RectRegion {
     ));
   }
 
+  /**
+   * Try "inject" a new {@code injectee} region into this region at coordinates {@code coord}.
+   * "Injection" means that the resulting region will be the same size as "this" region and
+   * that the corresponding cells of both regions will be combined (if possible). Two cells can be
+   * combined if at least one of them is empty (false). If both cells are non-empty (true),
+   * it means that there's no room for {@code injectee} region. In this case this function will
+   * return {@link Option.None}. Otherwise it will return new {@code RectRegion} that
+   * is the result of the injection.
+   */
   public Option<RectRegion> inject(RectRegion injectee, Coord coord) {
     // Check the boundaries. If we try to inject a region outside of
     // "this" region, we will return Empty
@@ -131,7 +177,7 @@ public class RectRegion {
             )
         );
 
-    return sequenceOptSeq(combined.map(Utils::sequenceOptSeq))
+    return sequenceSeqOpt(combined.map(Utils::sequenceSeqOpt))
         .map(newCells -> new RectRegion(newCells.map(List::toArray).toArray()));
   }
 

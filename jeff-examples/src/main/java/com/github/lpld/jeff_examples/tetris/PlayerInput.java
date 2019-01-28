@@ -1,5 +1,6 @@
 package com.github.lpld.jeff_examples.tetris;
 
+import com.github.lpld.jeff.IO;
 import com.github.lpld.jeff.Stream;
 import com.github.lpld.jeff_examples.tetris.Tetris.Move;
 
@@ -8,6 +9,7 @@ import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.NonBlockingReader;
 
 import java.io.IOException;
+import java.util.concurrent.Executor;
 
 import io.vavr.control.Option;
 import lombok.Getter;
@@ -19,12 +21,12 @@ import static io.vavr.API.Some;
  * @author leopold
  * @since 2019-01-27
  */
-public class UserInput {
+public class PlayerInput {
 
   @Getter
-  private final Stream<Move> moves;
+  private final Stream<Move> interactions;
 
-  public UserInput() throws IOException {
+  public PlayerInput(Executor executor) throws IOException {
     final Terminal term = TerminalBuilder.builder()
         .jansi(true)
         .system(true)
@@ -34,7 +36,7 @@ public class UserInput {
 
     final NonBlockingReader reader = term.reader();
 
-    moves = Stream.eval(IO(() -> reader.read()))
+    interactions = Stream.eval(IO.forked(executor).chain(IO(() -> reader.read())))
         .repeat()
         .map(input -> {
           switch ((char) input.intValue()) {
@@ -52,7 +54,6 @@ public class UserInput {
         })
         .filter(Option::isDefined)
         .map(Option::get);
-
   }
 
 

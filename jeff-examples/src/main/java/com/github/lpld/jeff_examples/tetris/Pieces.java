@@ -3,7 +3,6 @@ package com.github.lpld.jeff_examples.tetris;
 import com.github.lpld.jeff.Stream;
 
 import io.vavr.collection.List;
-import io.vavr.collection.Seq;
 
 import static com.github.lpld.jeff_examples.tetris.Utils.multF;
 
@@ -36,18 +35,26 @@ public class Pieces {
       RectRegion.parse("XXX",
                        ".X.");
 
-  public static final Seq<RectRegion> allPossiblePieces = List.of(0, 1).flatMap(
+  /**
+   * A list of all possible pieces.
+   */
+  public static final List<RectRegion> allPossiblePieces =
       // mirror
-      m -> List.of(0, 1, 2, 3).flatMap(
+      List.of(0, 1).flatMap(
           // rotate
-          r -> List.of(O, I, J, S, T).map(
-              p -> multF(RectRegion::mirror, m).andThen(multF(RectRegion::rotate, r))
-                  .apply(p)
+          m -> List.of(0, 1, 2, 3).flatMap(
+              // all shapes:
+              r -> List.of(O, I, J, S, T).map(
+                  // apply the transformation
+                  p -> multF(RectRegion::mirror, m).andThen(multF(RectRegion::rotate, r))
+                      .apply(p)
+              )
           )
-      )
-  );
+      );
 
-  // no randomness for now
+  /**
+   * Infinite stream of pieces.
+   */
   public static final Stream<RectRegion> infiniteStream = Stream.ofAll(allPossiblePieces).repeat();
 
 }

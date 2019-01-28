@@ -1,6 +1,5 @@
 package com.github.lpld.jeff_examples.tetris;
 
-import com.github.lpld.jeff.IO;
 import com.github.lpld.jeff.Stream;
 import com.github.lpld.jeff.data.Pr;
 
@@ -17,48 +16,113 @@ import static io.vavr.API.None;
 import static io.vavr.API.Some;
 
 /**
+ * Tetris game engine.
+ *
+ * The constructor of this class takes initial parameters (height and width)
+ * and stream of player's interactions. The output is {@link Tetris#gameStates()} method
+ * which returns a stream of {@link GameState}s, each of which represents the state
+ * of the game at a given time.
+ *
  * @author leopold
  * @since 2019-01-27
  */
 public class Tetris {
 
-
+  /**
+   * Player's move
+   */
   public enum Move {ROTATE, RIGHT, LEFT, DOWN}
 
+  /**
+   * Status of the game
+   */
   public enum Status {ACTIVE, PAUSED, OVER}
 
-  public enum EventType {TICK, USER_MOVE}
-
+  /**
+   * Game event. Anything that can change state of the game.
+   * Roughly speaking, old state + event = new state.
+   */
   @RequiredArgsConstructor
   public static class Event {
 
     public final EventType type;
     public final Move userMove;
 
+    /**
+     * Regular "tick" event.
+     */
     static Event tick() {
       return new Event(EventType.TICK, null);
     }
 
+    /**
+     * Player's interaction.
+     */
     static Event userAction(Move move) {
       return new Event(EventType.USER_MOVE, move);
     }
   }
 
+  /**
+   * Type of the event.
+   */
+  public enum EventType {TICK, USER_MOVE}
+
+  /**
+   * Holds all information about the state of the game at a given moment.
+   */
   @Getter
   @Wither
   @RequiredArgsConstructor
   public static class GameState {
 
+    /**
+     * Status of the game: active, paused or over
+     */
     private final Status status;
+
+    /**
+     * "Static" field (does not contain the currently falling piece)
+     */
     private final RectRegion field;
+
+    /**
+     * "Static" field plus currently falling piece at its current position.
+     */
     private final RectRegion fieldWithPiece;
+
+    /**
+     * Currently falling piece and its coordinate.
+     */
     private final Option<Pr<RectRegion, Coord>> activePiece;
+
+    /**
+     * Source of the pieces. Consists of a single piece (the next piece) and an
+     * infinite stream of all other pieces.
+     */
     private final Pr<RectRegion, Stream<RectRegion>> piecesSource;
+
+    /**
+     * Player's score
+     */
     private final int score;
+
+    /**
+     * Player's level
+     */
     private final int level;
+
+    /**
+     * The number or cleared lines in the current level
+     */
     private final int linesCleared;
   }
 
+  /**
+   * Create a new tetris game of a given dimensions.
+   *
+   * @param interactions Stream of player's interactions.
+   */
   public Tetris(int height, int width,
                 Stream<Move> interactions, ScheduledExecutorService scheduler) {
     this.height = height;
@@ -74,19 +138,23 @@ public class Tetris {
   private final ScheduledExecutorService scheduler;
   private final Coord start;
 
+  /**
+   * Stream of all game states.
+   */
   public Stream<GameState> gameStates() {
+
+    // empty initial field
     final RectRegion emptyField = RectRegion.ofSize(height, width);
 
     // Two sources of events:
     // 1. Regular ticks
     final Stream<Event> ticks = Stream.tick(scheduler, 500).map(t -> Event.tick());
 
+    // 2. Player's interactions:
     final Stream<Event> userMoves = interactions.map(Event::userAction);
 
+    // Merging them together:
     final Stream<Event> allEvents = ticks.merge(scheduler, userMoves);
-
-    allEvents.mapEval(e -> IO.delay(() -> System.out.println(e.type)))
-        .drain().run();
 
     final GameState initial = new GameState(
         Status.ACTIVE,
@@ -98,20 +166,31 @@ public class Tetris {
         1,
         0);
 
-    final Stream<GameState> states = allEvents.scanLeft(initial, this::nextState);
-
-    return states.takeWhile(s -> s.status != Status.OVER);
+    // transforming events stream into a stream of game states
+    // by taking the initial state and computing the next one using nextState method
+    return allEvents
+        .scanLeft(initial, this::nextState)
+        .takeWhile(s -> s.status != Status.OVER);
   }
 
+  // Compute the next game state given the previous state and an event
   private GameState nextState(GameState state, Event event) {
-    System.out.println("Next");
     switch (event.type) {
+      // Regular tick:
       case TICK:
         return state.activePiece
-            .flatMap(ap -> injectExisting(state, ap._1, ap._2.rowDown()))
-            .getOrElse(() -> activateNew(state));
 
-      default: // user move
+            // Moving the current piece one row down
+            .flatMap(ap -> updateCurrentPiece(state, ap._1, ap._2.rowDown()))
+
+            // or clear filled rows, if any:
+            .orElse(() -> clearFilledRows(state))
+
+            // or put new piece into the field:
+            .getOrElse(() -> injectNew(state));
+
+      // Player's move:
+      default:
 
         return state.activePiece.flatMap(ap -> {
 
@@ -120,19 +199,20 @@ public class Tetris {
 
           switch (event.userMove) {
             case LEFT:
-              return injectExisting(state, piece, at.left());
+              return updateCurrentPiece(state, piece, at.left());
             case RIGHT:
-              return injectExisting(state, piece, at.right());
+              return updateCurrentPiece(state, piece, at.right());
             case DOWN:
               return moveDown(state, piece, at);
             default: // rotate
               final Pr<RectRegion, Coord> rotated = rotate(piece, at);
-              return injectExisting(state, rotated._1, rotated._2);
+              return updateCurrentPiece(state, rotated._1, rotated._2);
           }
         }).getOrElse(state);
     }
   }
 
+  // Moving the active piece down (player has pressed 'down')
   private Option<GameState> moveDown(GameState state, RectRegion piece, Coord at) {
     // trying to shift the piece (downInterval + 1) rows down:
     final List<Pr<RectRegion, Coord>> shifts =
@@ -165,11 +245,8 @@ public class Tetris {
     }
   }
 
-  private GameState activateNew(GameState state) {
-    return checkFilledRows(state).getOrElse(injectNew(state));
-  }
-
-  private Option<GameState> checkFilledRows(GameState state) {
+  // clear filled rows, if there are any
+  private Option<GameState> clearFilledRows(GameState state) {
 
     return state.fieldWithPiece.clearFilledRows()
         .map(res -> {
@@ -203,15 +280,19 @@ public class Tetris {
     }
   }
 
+  // rotate a piece at a given coordinate
   private Pr<RectRegion, Coord> rotate(RectRegion piece, Coord coord) {
     final int diff = (piece.height() - piece.width()) / 2;
     return Pr.of(piece.rotate(), new Coord(coord.x + diff, coord.y - diff));
   }
 
+  // put new piece into the field at the starting position
   private GameState injectNew(GameState state) {
     final Pr<RectRegion, Stream<RectRegion>> newSource = pullNextPiece(state.piecesSource._2);
 
+    // trying to inject the new piece
     return tryInject(state.fieldWithPiece, state.piecesSource._1, start, newSource, state)
+        // if failed, then the game is over
         .getOrElse(state
                        .withStatus(Status.OVER)
                        .withField(state.fieldWithPiece)
@@ -219,10 +300,12 @@ public class Tetris {
         );
   }
 
-  private Option<GameState> injectExisting(GameState state, RectRegion piece, Coord at) {
+  // update current piece, by injecting a new one into the `state.field`.
+  private Option<GameState> updateCurrentPiece(GameState state, RectRegion piece, Coord at) {
     return tryInject(state.field, piece, at, state.piecesSource, state);
   }
 
+  // try injecting a piece into the field at a given coordinates
   private Option<GameState> tryInject(RectRegion field, RectRegion piece, Coord at,
                                       Pr<RectRegion, Stream<RectRegion>> piecesSource,
                                       GameState state) {

@@ -14,7 +14,10 @@ import static io.vavr.control.Option.some;
  */
 public class Utils {
 
-  public static <T> Option<List<T>> sequenceOptSeq(Seq<Option<T>> str) {
+  /**
+   * Sequence operation for Vavr's Seq and Option.
+   */
+  public static <T> Option<List<T>> sequenceSeqOpt(Seq<Option<T>> str) {
 
     return str.foldRight(
         some(List.empty()),
@@ -23,9 +26,9 @@ public class Utils {
   }
 
   /**
-   * Create a function that applies function f `times` times
+   * Create a function that applies function f {@code nTimes} times
    */
-  public static <A> Function<A, A> multF(Function<A, A> f, int times) {
-    return List.range(0, times).foldLeft(Function.identity(), (c, t) -> c.andThen(f));
+  public static <A> Function<A, A> multF(Function<A, A> f, int nTimes) {
+    return List.range(0, nTimes).foldLeft(Function.identity(), (c, t) -> c.andThen(f));
   }
 }
